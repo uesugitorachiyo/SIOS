@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools==84.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sios-core"
+version = "0.1.0a7"
+description = "Isolated SIOS prototype based on AIOS core"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
+authors = [{name = "AIOS Contributors"}]
+requires-python = ">=3.12"
+classifiers = ["Development Status :: 3 - Alpha", "Programming Language :: Python :: 3"]
+dependencies = ["tzdata>=2025.2", "PyYAML==6.0.3"]
+
+[project.optional-dependencies]
+agent = ["mcp==2.3.0"]
+index = ["basic-memory==0.23.2"]
+backup = ["cryptography==50.0.2", "psutil==7.2.2"]
+verification = ["jsonschema==4.25.1", "rfc3339-validator==0.1.4"]
+
+[project.urls]
+
+[project.scripts]
+sios = "aios.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools]
+include-package-data = false
+
+[tool.setuptools.package-data]
+aios = ["verification_data/security-report.schema.json"]
