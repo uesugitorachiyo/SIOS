@@ -74,11 +74,16 @@ def run(cfg: Config, ca_file: Path | None = None) -> None:
     def read(relative: str) -> Any:
         return call("read", {"relative": relative})
 
+    @mcp.tool(annotations=read_hint)
+    def read_revision(relative: str) -> Any:
+        """Read a Mission Markdown SHA-256 and byte count without its body."""
+        return call("read_revision", {"relative": relative})
+
     @mcp.tool(description="Search one knowledge store: brain, memory, or missions.", annotations=read_hint)
     def search(store: str, query: str) -> Any:
         return call("search", {"store": store, "query": query})
 
-    @mcp.tool(description="List bounded Mission body paths; read each path for current content and revision.", annotations=read_hint)
+    @mcp.tool(description="List bounded Mission bodies or noncanonical Brain review paths with existing read scope.", annotations=read_hint)
     def catalog(store: str) -> Any:
         return call("catalog", {"store": store})
 

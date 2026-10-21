@@ -94,6 +94,18 @@ def parser():
     approve = commands.add_parser("brain-approve", help="Owner terminal review; never exposed as an agent tool")
     approve.add_argument("--proposal", required=True)
     approve.add_argument("--request-id", required=True)
+    bundle = commands.add_parser("brain-bundle-propose", help="Stage one concept proposal with its containing index and Brain log")
+    bundle.add_argument("--concept-proposal", required=True)
+    bundle.add_argument("--index-file", required=True, type=Path)
+    bundle.add_argument("--log-file", required=True, type=Path)
+    bundle.add_argument("--index-expected-revision", required=True)
+    bundle.add_argument("--log-expected-revision", required=True)
+    bundle.add_argument("--request-id", required=True)
+    bundle_review = commands.add_parser("brain-bundle-review")
+    bundle_review.add_argument("--bundle", required=True)
+    bundle_approve = commands.add_parser("brain-bundle-approve", help="Owner terminal review of concept, index and log")
+    bundle_approve.add_argument("--bundle", required=True)
+    bundle_approve.add_argument("--request-id", required=True)
     snapshot = commands.add_parser("backup", help="Encrypted local snapshot; key remains outside AIOS")
     snapshot.add_argument("--output", type=Path, required=True)
     snapshot.add_argument("--key-env", default="SIOS_BACKUP_KEY")
@@ -122,6 +134,13 @@ def operation_params(args):
                                  "expected_revision": args.expected_revision, "request_id": args.request_id}
     if args.command == "brain-review":
         return "brain_review", {"proposal_id": args.proposal}
+    if args.command == "brain-bundle-propose":
+        return "brain_bundle_propose", {"concept_proposal_id": args.concept_proposal,
+                "index_content": file_text(args.index_file), "log_content": file_text(args.log_file),
+                "index_expected_revision": args.index_expected_revision,
+                "log_expected_revision": args.log_expected_revision, "request_id": args.request_id}
+    if args.command == "brain-bundle-review":
+        return "brain_bundle_review", {"bundle_id": args.bundle}
     if args.command == "index-search":
         return "memory_index_search", {"query": args.query}
     if args.command == "index-status":
@@ -189,28 +208,39 @@ def main(argv=None):
             print(json.dumps(result, default=str, indent=2))
             return 0
         cfg = Config.load(args.config)
-        if args.command == "brain-approve":
+        if args.command in ("brain-approve", "brain-bundle-approve"):
             if not sys.stdin.isatty():
                 raise ValueError("Owner approval requires interactive terminal review")
+            bundle_mode = args.command == "brain-bundle-approve"
+            review_operation = "brain_bundle_review" if bundle_mode else "brain_review"
+            review_params = {"bundle_id": args.bundle} if bundle_mode else {"proposal_id": args.proposal}
             if cfg.mode == "client":
                 remote = Client(cfg, ca_file=args.ca_file)
-                reviewed = remote.call("brain_review", {"proposal_id": args.proposal})
+                reviewed = remote.call(review_operation, review_params)
             else:
                 initialize(cfg)
                 store = Store(cfg.data_root, cfg.timezone)
-                reviewed = dispatch(store, "brain_review", {"proposal_id": args.proposal}, actor="local", scopes=ALL_SCOPES)
+                reviewed = dispatch(store, review_operation, review_params, actor="local", scopes=ALL_SCOPES)
             if reviewed["stale"]:
                 raise ValueError("Proposal is stale; reread and prepare a new proposal")
-            print(reviewed["diff"])
-            print(json.dumps({key: reviewed[key] for key in ("sources", "basis", "warnings", "approval_effect")}, ensure_ascii=False, indent=2))
-            confirmation = "approve " + reviewed["proposal_revision"]
+            if bundle_mode:
+                for key in ("concept_diff", "index_diff", "log_diff"):
+                    print(reviewed[key])
+                print(json.dumps({"warnings": reviewed["warnings"]}, ensure_ascii=False, indent=2))
+                confirmation = "approve " + reviewed["bundle_revision"]
+            else:
+                print(reviewed["diff"])
+                print(json.dumps({key: reviewed[key] for key in ("sources", "basis", "warnings", "approval_effect")}, ensure_ascii=False, indent=2))
+                confirmation = "approve " + reviewed["proposal_revision"]
             if input("Type " + confirmation + " to approve: ") != confirmation:
                 raise ValueError("Owner approval cancelled")
-            params = {"proposal_id": args.proposal, "proposal_revision": reviewed["proposal_revision"], "request_id": args.request_id}
+            params = ({"bundle_id": args.bundle, "bundle_revision": reviewed["bundle_revision"], "request_id": args.request_id}
+                      if bundle_mode else {"proposal_id": args.proposal, "proposal_revision": reviewed["proposal_revision"], "request_id": args.request_id})
+            apply_operation = "brain_bundle_apply" if bundle_mode else "brain_apply"
             if cfg.mode == "client":
-                result = remote.call("brain_apply", params)
+                result = remote.call(apply_operation, params)
             else:
-                result = dispatch(store, "brain_apply", params, actor="local", scopes=ALL_SCOPES|{"brain:approve"})
+                result = dispatch(store, apply_operation, params, actor="local", scopes=ALL_SCOPES|{"brain:approve"})
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0
         if args.command in ("index-setup", "index-wait"):

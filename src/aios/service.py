@@ -13,6 +13,7 @@ from .store import ConflictError, RecoveryError, Store, ValidationError
 
 OPERATIONS = {
     "read": ("read", "read"),
+    "read_revision": ("read_revision", "read"),
     "search": ("search", "read"),
     "catalog": ("catalog", "read"),
     "health": ("health", "read"),
@@ -40,6 +41,9 @@ OPERATIONS = {
     "brain_propose": ("propose", "brain:propose"),
     "brain_review": ("review", "read"),
     "brain_apply": ("apply", "brain:approve"),
+    "brain_bundle_propose": ("propose", "brain:propose"),
+    "brain_bundle_review": ("review", "read"),
+    "brain_bundle_apply": ("apply", "brain:approve"),
     "thread_create": ("create", "threads:create"),
     "thread_post": ("post", "threads:post"),
     "thread_list": ("list", "threads:read"),
@@ -66,7 +70,10 @@ def dispatch(store: Store, operation: str, params: dict[str, Any], *,
         raise PermissionError("Thread operations require thread read scope")
     if not isinstance(params, dict) or {"actor", "owner_authorized"} & set(params):
         raise ValidationError("Parameters must be an object without an actor override")
-    if operation.startswith("brain_"):
+    if operation.startswith("brain_bundle_"):
+        from .brain_bundle import BrainBundleWorkflow
+        method = getattr(BrainBundleWorkflow(store), method_name)
+    elif operation.startswith("brain_"):
         from .brain import BrainWorkflow
         method = getattr(BrainWorkflow(store), method_name)
     elif operation == "memory_capture":

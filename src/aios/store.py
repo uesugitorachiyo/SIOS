@@ -42,6 +42,7 @@ class NotFoundError(FileNotFoundError):
 MAX_BYTES = 2_000_000
 MAX_MISSION_CATALOG_ITEMS = 512
 MAX_MISSION_CATALOG_BYTES = 65_536
+MAX_READ_REVISION_BYTES = 128 * 1024 * 1024
 BRAIN_GUIDANCE_PATHS = frozenset({
     'Brain/AGENTS.md',
     'Brain/workflows/review-candidates.md',
@@ -361,10 +362,80 @@ class Store:
             data = self._read_bytes(path)
             if data is None:
                 raise NotFoundError(path)
-            return {'path': path, 'revision': _hash(data), 'text': data.decode('utf-8')}
+            result = {'path': path, 'revision': _hash(data), 'text': data.decode('utf-8')}
+            if path.startswith('Brain/brain/'):
+                result['authority_status'] = 'canonical'
+            elif path.startswith(('Brain/working/', 'Brain/candidates/', 'Brain/inbox/', 'Brain/sources/')):
+                result['authority_status'] = 'pending_or_source_not_canonical'
+            return result
+
+    def read_revision(self, relative):
+        """Stream an authorized Markdown file's SHA without returning its body.
+
+        This makes oversized Mission logs comparable with an existing read
+        snapshot while retaining the ordinary full-read limit.
+        """
+        path = self._read_relative(relative)
+        if not path.endswith('.md') or not path.startswith('Missions/'):
+            raise ValidationError('Revision read requires a Mission Markdown path')
+        with self._connection() as db:
+            self._recover(db)
+            body = self._read_path(path)
+            if not body.exists():
+                raise NotFoundError(path)
+            if not body.is_file():
+                raise ValidationError('Expected an ordinary file')
+            digest = hashlib.sha256()
+            size = 0
+            with body.open('rb') as stream:
+                for block in iter(lambda: stream.read(1024 * 1024), b''):
+                    size += len(block)
+                    if size > MAX_READ_REVISION_BYTES:
+                        raise ValidationError('Revision read exceeds bounded limit')
+                    digest.update(block)
+            return {'path': path, 'revision': digest.hexdigest(), 'bytes': size,
+                    'content_returned': False}
 
     def catalog(self, store):
-        """List only complete Mission body paths; callers read each for content."""
+        """List bounded paths already readable with the caller's read scope."""
+        if store == 'brain-review':
+            with self._connection() as db:
+                self._recover(db)
+                paths = []
+                encoded_bytes = 0
+                for folder, pending in (('Brain/working/candidates', True), ('Brain/inbox', False)):
+                    base = self._read_path(folder)
+                    if not base.is_dir():
+                        raise ValidationError('Brain review catalog root unavailable')
+                    try:
+                        entries = sorted(base.iterdir(), key=lambda path: path.name)
+                    except OSError as exc:
+                        raise ValidationError('Incomplete Brain review catalog') from exc
+                    for node in entries:
+                        self._check_node(node)
+                        if node.name.startswith('.') or node.name == 'README.md' or (pending and node.name.startswith('REVIEW-')):
+                            continue
+                        if node.is_dir():
+                            # Historical promoted candidates are not pending work.
+                            if pending and node.name.startswith('promoted-'):
+                                continue
+                            raise ValidationError('Nested Brain review items require explicit review')
+                        if not node.is_file() or node.suffix != '.md':
+                            continue
+                        relative = node.relative_to(self.root).as_posix()
+                        body = self._read_path(relative)
+                        try:
+                            if body.stat().st_size > MAX_BYTES:
+                                raise ValidationError('Brain review item exceeds read limit')
+                            with body.open('rb') as stream:
+                                stream.read(1)
+                        except OSError as exc:
+                            raise ValidationError('Incomplete Brain review catalog') from exc
+                        paths.append(relative)
+                        encoded_bytes += len(relative.encode('utf-8')) + 3
+                        if len(paths) > MAX_MISSION_CATALOG_ITEMS or encoded_bytes > MAX_MISSION_CATALOG_BYTES:
+                            raise ValidationError('Brain review catalog exceeds response limit')
+                return {'store': store, 'paths': paths, 'authority_status': 'pending_or_source_not_canonical'}
         if store != 'missions':
             raise ValidationError('Unknown catalog store')
         with self._connection() as db:

@@ -37,6 +37,15 @@ claim; it does not extract a conversation or inspect prose for secrets.
 Agent threads require an explicit server-side ACL and device scopes and are
 disabled by default.
 
+Brain proposals can be reviewed with a read-scoped client. An owner-operated
+terminal command can review and apply a three-file bundle containing one
+concept, its category index and the Brain log. It requires the separate
+`brain:approve` scope, an interactive confirmation and unchanged base
+revisions. Review material under `Brain/working/` and `Brain/inbox/` is
+noncanonical. `catalog(store="brain-review")` lists bounded pending paths for
+review; `read_revision` returns a bounded Mission Markdown hash and byte count
+without returning the body.
+
 See [domain boundaries](docs/DOMAIN_BOUNDARIES.md),
 [conversation capture](docs/CONVERSATION_CAPTURE.md),
 [agent threads](docs/AGENT_THREADS_L0.md), and
