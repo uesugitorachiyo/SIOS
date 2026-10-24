@@ -29,7 +29,7 @@ class MCPAdapterTests(unittest.TestCase):
             self.assertEqual(start.call_args.kwargs, {"transport": "stdio"})
             server = start.call_args.args[0]
             names = {tool.name for tool in asyncio.run(server.list_tools())}
-            self.assertTrue({"read", "catalog", "memory_write", "memory_index_refresh",
+            self.assertTrue({"identity", "read", "catalog", "memory_write", "memory_index_refresh",
                              "memory_index_search", "memory_capture",
                              "thread_create", "thread_post", "thread_list", "thread_read",
                              "thread_fetch", "thread_ack", "thread_close", "thread_revoke"} <= names)

@@ -88,6 +88,30 @@ class BackupTests(unittest.TestCase):
             backup(self.store, archive, os.urandom(32))
         self.assertFalse(archive.exists())
 
+    def test_registered_brain_guidance_survives_encrypted_restore(self):
+        guidance = (
+            'Brain/AGENTS.md',
+            'Brain/workflows/review-candidates.md',
+            'Brain/workflows/promote-memory.md',
+        )
+        (self.store.root / 'Guidance').mkdir()
+        (self.store.root / 'Guidance' / 'index.json').write_text(json.dumps({
+            'version': 1,
+            'documents': [{'path': path, 'when': 'synthetic Brain review'} for path in guidance],
+        }))
+        for path in guidance:
+            target = self.store.root / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(f'# Synthetic guidance: {path}\n')
+        key = os.urandom(32)
+        archive = self.base / 'brain-guidance.enc'
+        backup(self.store, archive, key)
+        recovered_root = self.base / 'brain-guidance-recovered'
+        restore(archive, recovered_root, key)
+        for path in guidance:
+            self.assertEqual((recovered_root / path).read_bytes(),
+                             (self.store.root / path).read_bytes())
+
 
 if __name__ == '__main__':
     unittest.main()

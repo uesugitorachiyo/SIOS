@@ -6,7 +6,8 @@ Trusted local callers/filesystem remain outside the remote-principal boundary.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+import difflib
 import hashlib
 import json
 import os
@@ -65,19 +66,52 @@ def require_validation(store):
         raise ValidationError('Central completion validation is disabled')
 
 
+def require_mission(store, name):
+    if name not in getattr(store, 'completion_missions', frozenset()):
+        raise PermissionError('Completion Mission not allowed')
+
+
 def bounded(value):
     encoded = engine().canonical(value).decode('utf-8')
     _text(encoded, 'completion input', MAX_BYTES)
     return encoded
 
 
-def load_control(db, vid):
+def load_control(store, db, vid):
     row = db.execute('SELECT control,actor,revoked FROM completion_controls WHERE id=?', (vid,)).fetchone()
     if row is None:
         raise ValidationError('Retained completion authority unavailable')
     if row[2]:
         raise PermissionError('Completion authority revoked')
-    return json.loads(row[0]), row[1]
+    control = json.loads(row[0])
+    require_mission(store, control['request']['binding']['mission_id'])
+    return control, row[1]
+
+
+def independent_review(control, coordinator):
+    """Retained principal/session separation required by every final consumer.
+
+    This checks declared sessions within the trusted-local identity model; it
+    cannot establish that different humans or OS accounts ran the reviews.
+    """
+    request = control['request']
+    actors = control['report_actors']
+    owner = control['approval_actor']
+    route = engine().validate_request(request)
+    writers = {coordinator, control['submitter']}
+    reviewers = {actors['qa'], actors['security']}
+    if (len(reviewers) != 2 or writers & reviewers
+            or (control['approval_required'] and (owner is None or owner in writers | reviewers))
+            or (not control['approval_required'] and owner is not None)
+            or (route['reviewer_dispatch'] == 'REQUIRED' and request['reviewer_actor'] != actors['qa'])
+            or request['reviewer_session'] == request['developer_session']):
+        return False
+    adapters = request['selected_adapters'].values()
+    return all(
+        adapter['actor'] not in {coordinator, control['submitter'], actors['qa'], owner}
+        and adapter['session'] not in {request['developer_session'], request['reviewer_session']}
+        for adapter in adapters
+    )
 
 
 def current_binding(store, control):
@@ -149,6 +183,7 @@ def register(store, control, actor):
         raise ValidationError('Invalid completion control')
     route = v.validate_request(control['request'])
     b = control['request']['binding']
+    require_mission(store, b['mission_id'])
     if b['stage'] != 'complete' or b['artifact_sha256'] is not None:
         raise ValidationError('Only development completion supported')
     v.opaque(control['submitter'])
@@ -198,7 +233,7 @@ def evidence(store, vid, reference, record, actor):
     require_validation(store)
     v = engine(); encoded = bounded(record)
     with store._connection() as db:
-        control, _ = load_control(db, vid)
+        control, _ = load_control(store, db, vid)
         expected = control['receipt_producers'].get(reference)
         if expected is None or actor != expected['actor']:
             raise PermissionError('Wrong evidence principal/reference')
@@ -230,7 +265,7 @@ def report(store, vid, kind, result, actor):
     require_validation(store)
     encoded = bounded(result)
     with store._connection() as db:
-        control, _ = load_control(db, vid)
+        control, _ = load_control(store, db, vid)
         if kind not in control['report_actors'] or control['report_actors'][kind] != actor:
             raise PermissionError('Wrong report principal')
         if kind == 'qa' and result.get('actor') != actor:
@@ -243,9 +278,11 @@ def approve(store, vid, control_digest, expires_at, actor):
     require_validation(store)
     v = engine()
     with store._connection() as db:
-        control, _ = load_control(db, vid)
+        control, coordinator = load_control(store, db, vid)
         if not control['approval_required'] or control['approval_actor'] != actor:
             raise PermissionError('Wrong approval principal')
+        if not independent_review(control, coordinator):
+            raise ValidationError('Independent completion review required')
         if v.digest(control) != control_digest or not now() < v.stamp(expires_at) <= v.stamp(control['request']['expires_at']):
             raise ValidationError('Approval target or validity differs')
         if current_binding(store, control) != control['request']['binding']:
@@ -257,10 +294,57 @@ def approve(store, vid, control_digest, expires_at, actor):
     return {'approved_scope': 'development_completion', 'enforcement_active': False}
 
 
+def review(store, vid, content, actor):
+    """Owner-only bounded preview; no approval or Mission mutation."""
+    require_validation(store)
+    _text(content)
+    v = engine()
+    with store._connection() as db:
+        control, coordinator = load_control(store, db, vid)
+        if not control['approval_required'] or actor != control['approval_actor']:
+            raise PermissionError('Wrong approval principal')
+        b = control['request']['binding']; name = b['mission_id']
+        before = store._bytes(f'Missions/{name}/mission.md')
+        if (_hash(before) != b['mission_revision']
+                or _hash(content.encode()) != control['desired_mission_sha256']
+                or mission_status(content) != 'completed' or current_binding(store, control) != b):
+            raise ValidationError('Review candidate or current binding differs')
+        reports = {kind: (json.loads(result), producer) for kind, result, producer in
+                   db.execute('SELECT kind,result,actor FROM completion_reports WHERE id=?', (vid,))}
+        records = {ref: json.loads(record) for ref, record in
+                   db.execute('SELECT reference,record FROM completion_evidence WHERE id=?', (vid,))}
+        registry = {ref: {**record, 'bytes': record['bytes'].encode()} for ref, record in records.items()}
+        instant = now(); request = control['request']
+        window = v.stamp(request['issued_at']) <= instant < v.stamp(request['expires_at'])
+        actors = control['report_actors']
+        independent = independent_review(control, coordinator)
+        assessment = {'advisory_eligible': False}
+        if set(reports) == {'qa', 'security'} and all(reports[k][1] == actors[k] for k in actors):
+            assessment = v.assess(request, reports['qa'][0], reports['security'][0], registry, b, now=instant)
+        eligible = assessment['advisory_eligible'] is True and window and independent
+        summary = {'mission': name, 'verification_id': vid, 'control_digest': v.digest(control),
+                   'expected_revision': b['mission_revision'], 'current_revision': _hash(before),
+                   'desired_mission_sha256': control['desired_mission_sha256'],
+                   'request_expires_at': request['expires_at'], 'owner_approval_required': True,
+                   'qa': {'actor': actors['qa'], 'session': request['reviewer_session'],
+                          'status': 'PASS' if eligible else 'INCOMPLETE'},
+                   'security': {'actor': actors['security'],
+                                'sessions': sorted({a['session'] for a in request['selected_adapters'].values()}),
+                                'status': 'PASS' if eligible else 'INCOMPLETE'},
+                   'independent': independent, 'eligible': eligible,
+                   'evidence_digest': v.digest({'reports': {k: row[0] for k, row in reports.items()}, 'records': records}),
+                   'diff': ''.join(difflib.unified_diff((before or b'').decode().splitlines(keepends=True),
+                                                       content.splitlines(keepends=True),
+                                                       fromfile=f'Missions/{name}/mission.md', tofile='proposed-completion'))}
+        summary['review_digest'] = v.digest(summary)
+        summary['review_expires_at'] = min(v.stamp(request['expires_at']), instant + timedelta(minutes=5)).isoformat()
+        return summary
+
+
 def revoke(store, vid, actor):
     require_validation(store)
     with store._connection() as db:
-        _, coordinator = load_control(db, vid)
+        _, coordinator = load_control(store, db, vid)
         if actor != coordinator:
             raise PermissionError('Wrong coordinator')
         db.execute('UPDATE completion_controls SET revoked=1 WHERE id=?', (vid,))
@@ -269,13 +353,19 @@ def revoke(store, vid, actor):
 
 def validate(store, db, vid, content, actor):
     require_validation(store)
-    v = engine(); control, coordinator = load_control(db, vid)
+    v = engine(); control, coordinator = load_control(store, db, vid)
     b = control['request']['binding']
     if actor != control['submitter'] or enrolled(db, b['mission_id']) != (b['project_id'], coordinator):
         raise PermissionError('Wrong completion principal/enrollment')
+    if not independent_review(control, coordinator):
+        raise ValidationError('Independent completion review required')
     if _hash(content.encode()) != control['desired_mission_sha256'] or mission_status(content) != 'completed':
         raise ValidationError('Completion target content differs')
-    results = {kind: json.loads(encoded) for kind, encoded in db.execute('SELECT kind,result FROM completion_reports WHERE id=?', (vid,))}
+    retained = {kind: (json.loads(encoded), principal) for kind, encoded, principal in
+                db.execute('SELECT kind,result,actor FROM completion_reports WHERE id=?', (vid,))}
+    if any(retained[kind][1] != control['report_actors'].get(kind) for kind in retained):
+        raise ValidationError('Report principal differs from retained control')
+    results = {kind: row[0] for kind, row in retained.items()}
     if set(results) != {'qa', 'security'}:
         raise ValidationError('Required producer reports missing')
     registry = {ref: json.loads(encoded) for ref, encoded in db.execute('SELECT reference,record FROM completion_evidence WHERE id=?', (vid,))}
@@ -305,6 +395,7 @@ def validate(store, db, vid, content, actor):
 
 def complete(store, name, content, request_id, vid, expected_revision, actor):
     require_validation(store)
+    require_mission(store, name)
     _text(content)
     if any(not re.search(r'^## ' + re.escape(h) + r'\r?$', content, re.M) for h in SECTIONS):
         raise ValidationError('Missing mission section')
@@ -338,6 +429,9 @@ def recovery_guard(store, db, request_id, intent):
     managed = db.execute('SELECT verification_id,actor,payload FROM completion_runs WHERE operation_id=?', (request_id,)).fetchone()
     if managed:
         vid, actor, payload = managed; data = json.loads(payload)
+        require_validation(store)
+        require_mission(store, data['name'])
+        load_control(store, db, vid)
         if intent != [{'path': f"Missions/{data['name']}/mission.md", 'before': data['expected_revision'], 'text': data['content']}]:
             raise ValidationError('Managed recovery intent differs')
         if _hash(store._bytes(intent[0]['path'])) == _hash(data['content'].encode()):

@@ -72,6 +72,7 @@ def parser():
     serve.add_argument("--cert", type=Path)
     serve.add_argument("--key", type=Path)
     serve.add_argument("--completion-validation", action="store_true", help="Isolated central validation only; disabled by default")
+    serve.add_argument("--completion-mission", action="append", default=[], help="Exact Mission allowed for isolated completion validation; repeat explicitly, default denies all")
     commands.add_parser("mcp", help="Run optional stdio MCP adapter")
     index_setup = commands.add_parser("index-setup", help="Configure a separate local Basic Memory index")
     index_setup.add_argument("--executable", default="basic-memory")
@@ -94,6 +95,12 @@ def parser():
     approve = commands.add_parser("brain-approve", help="Owner terminal review; never exposed as an agent tool")
     approve.add_argument("--proposal", required=True)
     approve.add_argument("--request-id", required=True)
+    completion_approve = commands.add_parser("completion-approve", help="Interactive owner review; never an agent MCP tool")
+    completion_approve.add_argument("--verification-id", required=True)
+    completion_approve.add_argument("--content-file", type=Path, required=True)
+    completion_approve.add_argument("--expires-at", required=True)
+    for name in ("expected-mission", "expected-control-digest", "expected-revision"):
+        completion_approve.add_argument("--" + name, required=True)
     bundle = commands.add_parser("brain-bundle-propose", help="Stage one concept proposal with its containing index and Brain log")
     bundle.add_argument("--concept-proposal", required=True)
     bundle.add_argument("--index-file", required=True, type=Path)
@@ -208,6 +215,18 @@ def main(argv=None):
             print(json.dumps(result, default=str, indent=2))
             return 0
         cfg = Config.load(args.config)
+        if args.command == "completion-approve":
+            if cfg.mode != "client":
+                raise ValueError("Owner approval requires an authenticated owner client")
+            from .owner_completion import approve as owner_approve
+            result = owner_approve(Client(cfg, ca_file=args.ca_file), args.verification_id,
+                                   file_text(args.content_file), args.expires_at,
+                                   interactive=sys.stdin.isatty(),
+                                   expected_mission=args.expected_mission,
+                                   expected_control_digest=args.expected_control_digest,
+                                   expected_revision=args.expected_revision)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
         if args.command in ("brain-approve", "brain-bundle-approve"):
             if not sys.stdin.isatty():
                 raise ValueError("Owner approval requires interactive terminal review")
@@ -270,6 +289,7 @@ def main(argv=None):
                 from .agent_threads import load_project_acl
                 thread_projects = load_project_acl(args.thread_acl, principals)
             server = make_server(Store(cfg.data_root, cfg.timezone, completion_validation=args.completion_validation,
+                                       completion_missions=args.completion_mission,
                                        thread_projects=thread_projects,
                                        thread_principals=principals if thread_projects is not None else None), cfg.instance_id, devices,
                                  bind=args.bind, port=args.port, cert=args.cert, key=args.key)

@@ -12,6 +12,7 @@ from .store import ConflictError, RecoveryError, Store, ValidationError
 
 
 OPERATIONS = {
+    "identity": ("identity", "read"),
     "read": ("read", "read"),
     "read_revision": ("read_revision", "read"),
     "search": ("search", "read"),
@@ -27,6 +28,7 @@ OPERATIONS = {
     "completion_evidence": ("completion_evidence", "completion:evidence"),
     "completion_report": ("completion_report", "completion:report"),
     "completion_approve": ("completion_approve", "completion:approve"),
+    "completion_review": ("completion_review", "completion:approve"),
     "mission_complete": ("mission_complete", "missions:complete"),
     "release_register": ("release_register", "release:control"),
     "release_evidence": ("release_evidence", "release:evidence"),
@@ -54,13 +56,22 @@ OPERATIONS = {
     "thread_revoke": ("revoke", "threads:manage"),
 }
 
+# Satellite clients can select one reviewed Memory delta and verify its index
+# without also receiving raw note-write or routine-publication authority.
+# Existing memory:write clients retain their deployed behavior.
+NARROW_MEMORY_SCOPES = {
+    "memory_capture": "memory:capture",
+    "memory_index_refresh": "memory:index_refresh",
+}
+
 
 def dispatch(store: Store, operation: str, params: dict[str, Any], *,
              actor: str, scopes: set[str]) -> Any:
     if operation not in OPERATIONS:
         raise ValidationError("Unknown operation")
     method_name, scope = OPERATIONS[operation]
-    if scope not in scopes:
+    narrow_scope = NARROW_MEMORY_SCOPES.get(operation)
+    if scope not in scopes and (narrow_scope is None or narrow_scope not in scopes):
         raise PermissionError("Operation is outside device scope")
     if operation == "memory_index_refresh" and "read" not in scopes:
         raise PermissionError("Index refresh with full-note return also requires read scope")
@@ -70,6 +81,10 @@ def dispatch(store: Store, operation: str, params: dict[str, Any], *,
         raise PermissionError("Thread operations require thread read scope")
     if not isinstance(params, dict) or {"actor", "owner_authorized"} & set(params):
         raise ValidationError("Parameters must be an object without an actor override")
+    if operation == "identity":
+        if params:
+            raise ValidationError("Identity takes no parameters")
+        return {"identity": actor, "scopes": sorted(scopes)}
     if operation.startswith("brain_bundle_"):
         from .brain_bundle import BrainBundleWorkflow
         method = getattr(BrainBundleWorkflow(store), method_name)

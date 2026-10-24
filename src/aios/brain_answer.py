@@ -101,7 +101,7 @@ def assess(index_read: object, category_reads: dict[str, object],
             issues.append(f"interpretation_conflict:{key}")
     return {
         "evidence_status": "REVIEW_REQUIRED" if issues else "EVIDENCE_READY",
-        "brain_authority": "SIOS_SNAPSHOT_ONLY",
+        "brain_authority": "UNATTESTED_BY_HELPER",
         "issues": sorted(set(issues)),
         "sources": sources,
         "limit": "Interpretations are annotations; evidence readiness is not an answer or proof of current AIOS Brain authority.",

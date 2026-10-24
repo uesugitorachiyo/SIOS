@@ -44,7 +44,7 @@ import unicodedata
 from zoneinfo import ZoneInfo
 
 from .identifiers import safe_relative
-from .store import Store, ValidationError
+from .store import BRAIN_GUIDANCE_PATHS, Store, ValidationError
 
 MAGIC = b'AIOS-BACKUP\x00\x01'
 MAX_ARCHIVE_BYTES = 1024 * 1024 * 1024
@@ -171,6 +171,7 @@ def _guidance_members(data):
         path = item['path']
         if (not path.endswith('.md') or not (
                 path in {'AGENTS.md', 'DESIGN-vercel.md'}
+                or path in BRAIN_GUIDANCE_PATHS
                 or path.startswith(('Policies/', 'UIUX/'))
                 or re.fullmatch(r'\.agents/skills/[a-z0-9-]+/SKILL\.md', path))):
             raise ValidationError('Guidance registry path outside bounded roots')

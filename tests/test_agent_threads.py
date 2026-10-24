@@ -5,8 +5,9 @@ from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from aios.agent_threads import NotEnabledError, load_project_acl
+from aios.agent_threads import ExpiredError, NotEnabledError, load_project_acl
 from aios.service import dispatch
 from aios.store import ConflictError, NotFoundError, Store, ValidationError
 
@@ -34,6 +35,86 @@ class AgentThreadsTests(unittest.TestCase):
         return self.call('thread_create', {'project': 'fixture', 'purpose': 'Synthetic review',
                          'participants': ['windows'], 'request_id': request_id,
                          'max_messages': 12})
+
+    def test_optional_expiry_boundary_replay_and_historical_access(self):
+        now = '2026-10-21T09:00:00+00:00'
+        deadline = '2026-10-21T09:00:01+00:00'
+        later = '2026-10-21T09:00:01+00:00'
+        create_args = {'project': 'fixture', 'purpose': 'Expiring synthetic review',
+                       'participants': ['windows'], 'request_id': 'exp-create',
+                       'expires_at': deadline}
+        with patch('aios.agent_threads._time', return_value=now):
+            created = self.call('thread_create', create_args)
+            tid = created['result']['thread_id']
+            post_args = {'thread_id': tid, 'body': 'Historical fixture',
+                         'kind': 'question', 'request_id': 'exp-post'}
+            posted = self.call('thread_post', post_args)
+            paused = self.call('thread_close', {'thread_id': tid, 'action': 'pause',
+                'expected_revision': posted['result']['revision'], 'request_id': 'exp-pause'})
+        with patch('aios.agent_threads._time', return_value=later):
+            # Existing accepted requests replay their original receipts, even
+            # though fresh discussion mutations now fail at the deadline.
+            self.assertEqual(created, self.call('thread_create', create_args))
+            self.assertEqual(posted, self.call('thread_post', post_args))
+            with self.assertRaises(ExpiredError):
+                self.call('thread_post', dict(post_args, request_id='exp-new'))
+            with self.assertRaises(ExpiredError):
+                self.call('thread_close', {'thread_id': tid, 'action': 'resume',
+                    'expected_revision': paused['result']['revision'],
+                    'request_id': 'exp-resume'})
+            visible = self.call('thread_read', {'thread_id': tid}, actor='windows')
+            self.assertTrue(visible['expired'])
+            self.assertEqual(visible['expires_at'], deadline)
+            self.assertEqual(len(visible['messages']), 1)
+            listed = self.call('thread_list', {'project': 'fixture'})['threads']
+            self.assertTrue(listed[0]['expired'])
+            self.assertEqual(self.call('thread_fetch', {'thread_id': tid,
+                'through_seq': 1, 'request_id': 'exp-fetch'}, actor='windows')['result']['last_fetched_seq'], 1)
+            self.assertEqual(self.call('thread_ack', {'thread_id': tid,
+                'through_seq': 1, 'request_id': 'exp-ack'}, actor='windows')['result']['last_acknowledged_seq'], 1)
+            closed = self.call('thread_close', {'thread_id': tid, 'action': 'close',
+                'expected_revision': paused['result']['revision'], 'request_id': 'exp-close'})
+            self.assertEqual(closed['result']['status'], 'closed')
+            self.call('thread_revoke', {'thread_id': tid, 'participant': 'windows',
+                'expected_revision': closed['result']['revision'], 'request_id': 'exp-revoke'})
+            with self.assertRaises(NotFoundError):
+                self.call('thread_read', {'thread_id': tid}, actor='windows')
+
+    def test_expiry_validation_and_existing_no_expiry_thread(self):
+        base = {'project': 'fixture', 'purpose': 'Synthetic review',
+                'participants': ['windows'], 'request_id': 'bad-expiry'}
+        for expiry in ('2026-10-21T09:00:00', 'not-a-date', 23):
+            with self.assertRaises(ValidationError):
+                self.call('thread_create', dict(base, expires_at=expiry))
+        with patch('aios.agent_threads._time', return_value='2026-10-21T09:00:00+00:00'):
+            with self.assertRaises(ValidationError):
+                self.call('thread_create', dict(base, expires_at='2026-10-21T08:59:59Z'))
+        tid = self.create('no-expiry')['result']['thread_id']
+        with patch('aios.agent_threads._time', return_value='2099-01-01T00:00:00+00:00'):
+            visible = self.call('thread_read', {'thread_id': tid})
+            self.assertIsNone(visible['expires_at'])
+            self.assertFalse(visible['expired'])
+            self.assertEqual(self.call('thread_post', {'thread_id': tid,
+                'body': 'Still open', 'kind': 'status',
+                'request_id': 'no-expiry-post'})['result']['seq'], 1)
+
+    def test_existing_thread_table_migrates_with_null_expiry(self):
+        legacy = Path(self.temp.name).resolve() / 'legacy'
+        database = legacy / 'Database'
+        database.mkdir(parents=True)
+        with sqlite3.connect(database / 'state') as db:
+            db.execute('''CREATE TABLE agent_threads (
+                thread_id TEXT PRIMARY KEY, project TEXT NOT NULL, purpose TEXT NOT NULL,
+                owner TEXT NOT NULL, status TEXT NOT NULL, revision INTEGER NOT NULL,
+                next_seq INTEGER NOT NULL, max_messages INTEGER NOT NULL,
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL)''')
+            db.execute('''INSERT INTO agent_threads VALUES
+                ('legacy-id','fixture','Old discussion','mac','open',1,1,12,'2026-10-01','2026-10-01')''')
+        Store(legacy, thread_projects=PROJECTS, thread_principals=GRANTS)
+        with sqlite3.connect(database / 'state') as db:
+            self.assertIn('expires_at', {row[1] for row in db.execute('PRAGMA table_info(agent_threads)')})
+            self.assertIsNone(db.execute(
+                "SELECT expires_at FROM agent_threads WHERE thread_id='legacy-id'").fetchone()[0])
 
     def test_round_trip_receipts_acl_and_reopen(self):
         created = self.create()

@@ -37,7 +37,7 @@ class BrainAnswerTests(unittest.TestCase):
     def test_correct_full_evidence_is_ready_but_snapshot_only(self):
         result = self.evaluate()
         self.assertEqual(result["evidence_status"], "EVIDENCE_READY")
-        self.assertEqual(result["brain_authority"], "SIOS_SNAPSHOT_ONLY")
+        self.assertEqual(result["brain_authority"], "UNATTESTED_BY_HELPER")
         self.assertEqual(result["sources"][0]["revision"], self.concept["revision"])
         self.assertNotIn("The approved direction", str(result))
 

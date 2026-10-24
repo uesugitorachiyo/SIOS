@@ -13,7 +13,7 @@ from .config import Config, initialize
 from .server import ALL_SCOPES
 from .service import dispatch
 from .store import ConflictError, NotFoundError, Store, ValidationError, RecoveryError
-from .agent_threads import NotEnabledError
+from .agent_threads import ExpiredError, NotEnabledError
 
 
 def run(cfg: Config, ca_file: Path | None = None) -> None:
@@ -55,6 +55,8 @@ def run(cfg: Config, ca_file: Path | None = None) -> None:
             raise RuntimeError("not_found") from None
         except NotEnabledError:
             raise RuntimeError("not_enabled") from None
+        except ExpiredError:
+            raise RuntimeError("expired") from None
         except ConflictError:
             raise RuntimeError("conflict") from None
         except RecoveryError:
@@ -94,6 +96,10 @@ def run(cfg: Config, ca_file: Path | None = None) -> None:
     @mcp.tool(description="Check the configured instance health.", annotations=read_hint)
     def health() -> Any:
         return call("health", {})
+
+    @mcp.tool(description="Report this connection's authenticated principal and granted scopes; local mode reports local. No token or credential material is returned.", annotations=read_hint)
+    def identity() -> Any:
+        return call("identity", {})
 
     @mcp.tool(description="Search the isolated historical Basic Memory index, if configured; indexing may lag committed files.", annotations=read_hint)
     def memory_index_search(query: str) -> Any:
@@ -159,10 +165,10 @@ def run(cfg: Config, ca_file: Path | None = None) -> None:
 
         @mcp.tool(description="Create one bounded project discussion. Requires an enabled server-side thread ACL and threads:create plus threads:read scopes. Participant IDs must be authenticated configured principals with the same project grant.", annotations=write_hint)
         def thread_create(project: str, purpose: str, participants: list[str], request_id: str,
-                          max_messages: int = 12) -> Any:
+                          max_messages: int = 12, expires_at: str | None = None) -> Any:
             return call("thread_create", {"project": project, "purpose": purpose,
                                           "participants": participants, "request_id": request_id,
-                                          "max_messages": max_messages})
+                                          "max_messages": max_messages, "expires_at": expires_at})
 
         @mcp.tool(description="Append one untrusted message to an authorized open discussion. Does not wake or control a desktop conversation. Retry the exact request ID and payload after uncertain delivery.", annotations=write_hint)
         def thread_post(thread_id: str, body: str, kind: str, request_id: str,

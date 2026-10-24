@@ -78,9 +78,12 @@ def _component(value):
 
 class Store:
     def __init__(self, data_root: Path, timezone='UTC', *, completion_validation=False, release_validation=False,
-                 thread_projects=None, thread_principals=None):
+                 thread_projects=None, thread_principals=None, completion_missions=()):
         self.root = Path(os.path.abspath(data_root))
         self.completion_validation = completion_validation is True
+        if not isinstance(completion_missions, (list, tuple, set, frozenset)):
+            raise ValidationError('Completion Mission allowlist must be a finite collection')
+        self.completion_missions = frozenset(_component(name) for name in completion_missions)
         self.release_validation = release_validation is True
         self.agent_threads_enabled = thread_projects is not None and thread_principals is not None
         self.thread_projects = {key: frozenset(value) for key, value in (thread_projects or {}).items()}
@@ -202,7 +205,16 @@ class Store:
         path = self._path(relative)
         path.parent.mkdir(parents=True, exist_ok=True)
         self._path(relative)
-        fd, temporary = tempfile.mkstemp(prefix='.aios-', dir=path.parent)
+        # A guarded completion inventories the exact candidate directory.
+        # Stage in its parent (same filesystem) so the guard can run after
+        # fsync, immediately before replace, without seeing our own file.
+        staging_dir = path.parent.parent if before_replace is not None else path.parent
+        if before_replace is not None:
+            if staging_dir != self.root and self.root not in staging_dir.parents:
+                raise ValidationError('Guarded staging must remain in the data root')
+            if staging_dir.stat().st_dev != path.parent.stat().st_dev:
+                raise ValidationError('Guarded staging requires the same filesystem')
+        fd, temporary = tempfile.mkstemp(prefix='.aios-', dir=staging_dir)
         try:
             with os.fdopen(fd, 'wb') as stream:
                 stream.write(content.encode('utf-8'))
@@ -219,6 +231,12 @@ class Store:
                         os.fsync(directory)
                     finally:
                         os.close(directory)
+                    if staging_dir != path.parent:
+                        directory = os.open(staging_dir, os.O_RDONLY)
+                        try:
+                            os.fsync(directory)
+                        finally:
+                            os.close(directory)
                 except OSError:
                     pass
         finally:
@@ -556,6 +574,10 @@ class Store:
     def completion_approve(self, verification_id, control_digest, expires_at, actor='local'):
         from .completion import approve
         return approve(self, verification_id, control_digest, expires_at, actor)
+
+    def completion_review(self, verification_id, content, actor='local'):
+        from .completion import review
+        return review(self, verification_id, content, actor)
 
     def completion_revoke(self, verification_id, actor='local'):
         from .completion import revoke

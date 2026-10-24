@@ -15,7 +15,7 @@ import sys
 from typing import Any
 
 from .service import dispatch
-from .agent_threads import NotEnabledError
+from .agent_threads import ExpiredError, NotEnabledError
 from .basic_memory import BasicMemoryError
 from .store import Store, ConflictError, ValidationError, RecoveryError
 
@@ -24,7 +24,8 @@ MAX_RESPONSE = 16 * 1024 * 1024
 ALL_SCOPES = {"read", "memory:write", "missions:write", "brain:propose"}
 SUPPORTED_SCOPES = ALL_SCOPES | {"brain:approve", "completion:control", "completion:evidence", "completion:report", "completion:approve", "missions:complete",
                                  "release:control", "release:evidence", "release:report", "release:approve", "release:check",
-                                 "threads:create", "threads:post", "threads:read", "threads:ack", "threads:manage"}
+                                 "threads:create", "threads:post", "threads:read", "threads:ack", "threads:manage",
+                                 "memory:capture", "memory:index_refresh"}
 
 
 @dataclass(frozen=True)
@@ -149,6 +150,8 @@ def make_server(store: Store, instance_id: str, devices: list[Device], *,
                 self.respond(403, {"error": "forbidden"})
             except NotEnabledError:
                 self.respond(403, {"error": "not_enabled"})
+            except ExpiredError:
+                self.respond(409, {"error": "expired"})
             except ConflictError:
                 self.respond(409, {"error": "conflict", "message": "Reread the record and reconcile; preserve the original request ID for retries."})
             except (ValidationError, json.JSONDecodeError, UnicodeError, TypeError):

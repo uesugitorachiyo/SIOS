@@ -94,6 +94,19 @@ def stamp(value):
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
+def validate_security_schema(security):
+    """Reject malformed report timestamps even if an optional format plugin is absent."""
+    from jsonschema import Draft202012Validator, FormatChecker
+    schema = parse((Path(__file__).with_name('verification_data') / 'security-report.schema.json').read_text(encoding='utf-8'))
+    format_checker = FormatChecker()
+    if 'date-time' not in format_checker.checkers:
+        raise ValueError('Security date-time validation unavailable')
+    Draft202012Validator(schema, format_checker=format_checker).validate(security)
+    advisory_at = security['environment']['advisory_snapshot_at']
+    if advisory_at is not None:
+        stamp(advisory_at)
+
+
 def path_name(value):
     if (not isinstance(value, str) or not value or "\\" in value or ":" in value
             or any(part in ("", ".", "..") for part in value.split("/"))
@@ -291,6 +304,10 @@ def assess(request, qa, security, registry, current_binding, *, now=None, consum
     route = {"route": "UNKNOWN", "reviewer_dispatch": "REQUIRED"}
     try:
         route = validate_request(request)
+        for adapter in request["selected_adapters"].values():
+            if (adapter["actor"] == request["reviewer_actor"]
+                    or adapter["session"] in {request["reviewer_session"], request["developer_session"]}):
+                raise ValueError("Security producer is not independent")
         binding_valid(current_binding)
         if request["binding"] != current_binding:
             blockers.append("current candidate/control/mission binding changed")
@@ -303,7 +320,7 @@ def assess(request, qa, security, registry, current_binding, *, now=None, consum
         if request["binding"]["stage"] == "release":
             blockers.append("release consumer/approvals/artifact qualification is outside advisory pilot")
 
-        def receipt(ref, *, actor=None, kind=None, count=1, observations=()):
+        def receipt(ref, *, actor=None, kind=None, session=None, count=1, observations=()):
             opaque(ref)
             record = registry.get(ref)
             exact(record, {"bytes", "sha256", "binding", "actor", "session", "kind", "count",
@@ -325,7 +342,7 @@ def assess(request, qa, security, registry, current_binding, *, now=None, consum
                 raise ValueError("insufficient execution count")
             if not isinstance(record["observations"], list) or not set(observations) <= set(record["observations"]):
                 raise ValueError("missing observations")
-            if kind == "independent_review" and record["session"] != request["reviewer_session"]:
+            if session is not None and record["session"] != session:
                 raise ValueError("review session mismatch")
             return record
 
@@ -371,7 +388,9 @@ def assess(request, qa, security, registry, current_binding, *, now=None, consum
                 raise ValueError("unsupported QA PASS")
             for ref in row["evidence_refs"]:
                 receipt(ref, actor=request["reviewer_actor"] if r["evidence_kind"] == "independent_review" else None,
-                        kind=r["evidence_kind"], count=r["min_count"], observations=r["observations"])
+                        kind=r["evidence_kind"],
+                        session=request["reviewer_session"] if r["evidence_kind"] == "independent_review" else None,
+                        count=r["min_count"], observations=r["observations"])
         if not isinstance(qa["perspectives"], list):
             raise ValueError("review perspective outcomes missing")
         perspectives = {}
@@ -390,6 +409,7 @@ def assess(request, qa, security, registry, current_binding, *, now=None, consum
             else:
                 for ref in row["evidence_refs"]:
                     receipt(ref, actor=request["reviewer_actor"], kind="independent_review",
+                            session=request["reviewer_session"],
                             observations=[perspective, "context-consumed"])
         seen = set()
         if not isinstance(qa["findings"], list):
@@ -409,13 +429,12 @@ def assess(request, qa, security, registry, current_binding, *, now=None, consum
             for ref in finding["evidence_refs"]:
                 if finding["blocking"] and finding["status"] == "FIXED":
                     receipt(ref, actor=request["reviewer_actor"], kind="independent_review",
+                            session=request["reviewer_session"],
                             observations=["fix-verified", finding["id"]])
                 else:
                     receipt(ref)
 
-        from jsonschema import Draft202012Validator, FormatChecker
-        schema = parse((Path(__file__).with_name("verification_data") / "security-report.schema.json").read_text(encoding="utf-8"))
-        Draft202012Validator(schema, format_checker=FormatChecker()).validate(security)
+        validate_security_schema(security)
         if security["record_kind"] != "execution":
             raise ValueError("Security template is not execution")
         b = request["binding"]
@@ -472,7 +491,8 @@ def assess(request, qa, security, registry, current_binding, *, now=None, consum
                 raise ValueError("unresolved Security finding reference")
             for ref in c["evidence_refs"]:
                 expected_kind = ("automated" if c["kind"] == "automated" else "independent_review") if selected else None
-                record = receipt(ref, kind=expected_kind, actor=adapter["actor"] if selected else None)
+                record = receipt(ref, kind=expected_kind, actor=adapter["actor"] if selected else None,
+                                 session=adapter["session"] if selected else None)
                 if selected and record["session"] != adapter["session"]:
                     raise ValueError("Security producer session mismatch")
                 if selected and not {"executed", "observed"} <= set(record["observations"]):

@@ -12,16 +12,26 @@ personal notes, Mission content or runtime data. Keep those outside the Git
 checkout. The application is a prototype and has not been qualified for a
 production deployment.
 
+See [validation scope](docs/VALIDATION.md) for the public-source checks and
+their limits.
+
 ## Install and use
+
+Start with the [clean-instance guide and workflow status](docs/CLEAN_START.md).
+It distinguishes available source features from optional setup and remaining
+qualification. The [minimal coding-handoff design](docs/SOFTWARE_FACTORY_DESIGN.md)
+is a proposal; its helper has not been implemented.
 
 Python 3.12 or newer is required. Create a virtual environment, install the
 project with the optional features you need, then run `sios --help`.
 
 ```sh
 python3 -m venv .venv
-.venv/bin/python -m pip install -e '.[agent,index,backup,verification]'
+.venv/bin/python -m pip install -e .
 .venv/bin/sios --help
 ```
+
+Add optional features separately as described in the clean-instance guide.
 
 Create a private configuration with `sios setup --help`. Point its data and
 cache roots outside this repository. The server accepts private-network
@@ -50,6 +60,17 @@ See [domain boundaries](docs/DOMAIN_BOUNDARIES.md),
 [conversation capture](docs/CONVERSATION_CAPTURE.md),
 [agent threads](docs/AGENT_THREADS_L0.md), and
 [deployment guidance](docs/FIRST_SLICE_DEPLOYMENT.md).
+
+The optional [protected completion contract](docs/PROTECTED_COMPLETION.md)
+describes explicit target allowlists, retained review and interactive owner
+approval. It is disabled by default and is separate from ordinary Mission
+writes and from qualification of any particular deployment.
+
+[Offline QA report coverage](docs/QA_REPORT_COVERAGE.md) checks declared
+requirements against fixed artifacts and supplied review evidence.
+[Memory index diagnostics](docs/MEMORY_INDEX_DIAGNOSTICS.md) compare an
+explicit local source and index without changing them. These utilities do
+not authenticate a reviewer, repair an index or approve a release.
 
 ## Publishing boundary
 

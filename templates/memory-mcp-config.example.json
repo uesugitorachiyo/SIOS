@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "sios-memory": {
+      "command": "<ABSOLUTE_WINDOWS_POWERSHELL_EXE>",
+      "args": [
+        "-NoLogo",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "RemoteSigned",
+        "-File",
+        "<PRIVATE_SETUP_ROOT>/windows-client.ps1",
+        "-SetupRoot",
+        "<PRIVATE_SETUP_ROOT>",
+        "-SiosExe",
+        "<RUNTIME>/Scripts/sios-memory.exe"
+      ]
+    }
+  }
+}
