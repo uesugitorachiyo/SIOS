@@ -671,7 +671,8 @@ class SimpleEvidenceChecks(unittest.TestCase):
                 run,_=self.checked(root);path=root/'receipt.json';simple._put(path,self.receipt(run,root))
                 original_put=simple._put;original_open=Path.open;original_unlink=Path.unlink
                 original_publish=simple._publish_review_import
-                fault=OSError('SYNTHETIC-'+stage)
+                fault=OSError(13, 'SYNTHETIC-PRIVATE-MESSAGE', '/private/synthetic-path')
+                fault.winerror=5
                 def put(path,value):
                     path=Path(path)
                     part={'REVIEW_STARTED.json':'marker','REVIEW.json':'receipt','REVIEW_IMPORT.pending':'import'}.get(path.name)
@@ -698,15 +699,18 @@ class SimpleEvidenceChecks(unittest.TestCase):
                 def unlink(path,*args,**kw):
                     if stage=='unlink' and path==run/'REVIEW_IMPORT.pending':raise fault
                     return original_unlink(path,*args,**kw)
-                def publish(root,imported):
-                    original_publish(root,imported)
+                def publish(root,imported,**kwargs):
+                    original_publish(root,imported,**kwargs)
                     if stage=='publish-after':raise fault
+                def link(src,dst):
+                    if stage=='link':raise fault
+                    Path(dst).write_bytes(Path(src).read_bytes())
                 with contextlib.ExitStack() as stack:
                     stack.enter_context(patch.object(simple,'_put',side_effect=put))
                     stack.enter_context(patch.object(Path,'open',opened))
                     stack.enter_context(patch.object(Path,'unlink',unlink))
                     stack.enter_context(patch.object(simple,'_publish_review_import',side_effect=publish))
-                    if stage=='link':stack.enter_context(patch.object(simple.os,'link',side_effect=fault))
+                    stack.enter_context(patch.object(simple.os,'link',side_effect=link))
                     with self.assertRaises(OSError) as seen:simple.report(run,path)
                     self.assertIs(seen.exception,fault)
                 if stage=='marker-before':
@@ -719,6 +723,14 @@ class SimpleEvidenceChecks(unittest.TestCase):
                     return {str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in files if p.is_file()}
                 saved=snapshot()
                 self.assertTrue((run/'REVIEW_STARTED.json').exists())
+                failure=simple._read(run/'REVIEW_FAILED.json')
+                expected={'marker':'marker_write','claim':'claim_write','raw':'evidence_write',
+                          'receipt':'receipt_write','import':'import_pending',
+                          'link':'import_link','unlink':'import_unlink','publish':'import_published'}
+                self.assertEqual(failure['phase'],expected[stage.split('-')[0]])
+                self.assertEqual((failure['errno'],failure['winerror']),(13,5))
+                self.assertNotIn('SYNTHETIC-PRIVATE-MESSAGE', (run/'REVIEW_FAILED.json').read_text())
+                self.assertNotIn('/private/synthetic-path', (run/'REVIEW_FAILED.json').read_text())
                 self.assertEqual(simple.report(run)['state'],'review_import_incomplete')
                 with self.refusal('review_import_consumed'):simple.report(run,path)
                 switched={**self.receipt(run,root),'reviewer_session_id':'different-SYNTHETIC-session'}
@@ -741,6 +753,30 @@ class SimpleEvidenceChecks(unittest.TestCase):
             saved=(run/'REVIEW_STARTED.json').read_bytes()
             self.assertEqual(simple.report(run)['state'],'PASS')
             self.assertEqual((run/'REVIEW_STARTED.json').read_bytes(),saved)
+
+    def test_review_failure_number_is_strict_and_diagnostic_write_cannot_mask_primary(self):
+        for value in (True, -1, 2147483648, 3.0, '13', None):
+            with self.subTest(value=value):
+                self.assertIsNone(simple._review_error_number(types.SimpleNamespace(errno=value), 'errno'))
+        for value in (0, 13, 2147483647):
+            self.assertEqual(simple._review_error_number(types.SimpleNamespace(errno=value), 'errno'), value)
+        class Unreadable(Exception):
+            @property
+            def errno(self): raise RuntimeError('private exception text')
+        self.assertIsNone(simple._review_error_number(Unreadable(), 'errno'))
+        with directory() as root:
+            run,_=self.checked(root); receipt=root/'receipt.json';simple._put(receipt,self.receipt(run,root))
+            original=simple._put; first=OSError(13, 'private text', '/private/path')
+            def put(path,value):
+                if Path(path).name == 'REVIEW.json': raise first
+                if Path(path).name == 'REVIEW_FAILED.json': raise OSError('secondary diagnostic failure')
+                return original(path,value)
+            with patch.object(simple,'_put',side_effect=put):
+                with self.assertRaises(OSError) as seen:simple.report(run,receipt)
+            self.assertIs(seen.exception,first)
+            self.assertTrue((run/'REVIEW_STARTED.json').exists())
+            self.assertEqual(simple.report(run)['state'],'review_import_incomplete')
+            with self.refusal('review_import_consumed'):simple.report(run,receipt)
 
     def test_historical_complete_negative_import_without_marker_remains_valid(self):
         with directory() as root:

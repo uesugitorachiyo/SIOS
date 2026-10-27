@@ -21,6 +21,20 @@ MAX_SOURCE = 8 * 1024 * 1024
 RECEIPT_KEYS = {'kind', 'run_id', 'packet_sha256', 'reviewer_id', 'reviewer_session_id',
                 'implementation_session_id', 'reviewed_utc', 'verdicts', 'evidence'}
 FACETS = {'functionality', 'security', 'test_integrity', 'verification_security'}
+REVIEW_FAILURE_PHASES = frozenset({'marker_write', 'marker_digest', 'claim_directory', 'claim_write',
+    'evidence_write', 'receipt_write', 'receipt_digest', 'evidence_digest', 'import_pending',
+    'import_link', 'import_unlink', 'import_published', 'retained_verify', 'unknown'})
+REVIEW_ERROR_KINDS = frozenset({'OSError', 'PermissionError', 'FileNotFoundError', 'FileExistsError',
+    'IsADirectoryError', 'NotADirectoryError', 'BlockingIOError', 'InterruptedError', 'TimeoutError',
+    'ValueError', 'TypeError', 'KeyboardInterrupt', 'SystemExit', 'Blocked'})
+
+
+def _review_error_number(exc, name):
+    try:
+        value = getattr(exc, name, None)
+    except BaseException:
+        return None
+    return value if type(value) is int and 0 <= value <= 2147483647 else None
 
 
 def _sha(path):
@@ -313,13 +327,17 @@ def _start_identity(root, prepared, receipt, source_sha256):
             'reviewer_session_id': receipt['reviewer_session_id'], 'check_sha256': _sha(root / 'CHECK.json')}
 
 
-def _publish_review_import(root, imported):
+def _publish_review_import(root, imported, *, on_phase=None):
     # Final name is never a partially written JSON record. The visible pending
     # file also keeps an interrupted link/unlink publication nonpositive.
     pending = root / 'REVIEW_IMPORT.pending'
+    if on_phase is not None: on_phase('import_pending')
     _put(pending, imported)
+    if on_phase is not None: on_phase('import_link')
     os.link(pending, root / 'REVIEW_IMPORT.json')
+    if on_phase is not None: on_phase('import_unlink')
     pending.unlink()
+    if on_phase is not None: on_phase('import_published')
 
 
 def _saved_predecessor(root):
@@ -625,28 +643,45 @@ def _report_locked(run_dir, review_receipt=None):
         claim = sessions / (digest(receipt['reviewer_session_id'].casefold().encode()) + '.json')
         require(not claim.exists() and not claim.is_symlink(), 'review_session_consumed')
         marker = _start_identity(root, prepared, receipt, digest(source_raw))
+        phase = 'marker_write'
+        def mark_phase(value):
+            nonlocal phase
+            phase = value
         try:
             # Whole-run admission is exclusive and precedes claim or publication.
             _put(root / 'REVIEW_STARTED.json', marker)
+            phase = 'marker_digest'
             started_sha = _sha(root / 'REVIEW_STARTED.json')
+            phase = 'claim_directory'
             sessions.mkdir(exist_ok=True)
+            phase = 'claim_write'
             _put(claim, {'run_id': prepared['run_id'], 'packet_sha256': receipt['packet_sha256'],
                          'reviewer_session_id': receipt['reviewer_session_id'],
                          'receipt_sha256': marker['receipt_sha256'], 'started_sha256': started_sha})
+            phase = 'evidence_write'
             with (root / 'REVIEW_EVIDENCE').open('xb') as stream:
                 stream.write(raw); stream.flush(); os.fsync(stream.fileno())
+            phase = 'receipt_write'
             _put(root / 'REVIEW.json', receipt)
-            _publish_review_import(root, {'receipt_sha256': _sha(root / 'REVIEW.json'),
-                 'evidence_sha256': _sha(root / 'REVIEW_EVIDENCE'),
-                 'source_receipt_sha256': marker['source_receipt_sha256'], 'started_sha256': started_sha})
+            phase = 'receipt_digest'
+            receipt_sha = _sha(root / 'REVIEW.json')
+            phase = 'evidence_digest'
+            evidence_sha = _sha(root / 'REVIEW_EVIDENCE')
+            _publish_review_import(root, {'receipt_sha256': receipt_sha,
+                 'evidence_sha256': evidence_sha, 'source_receipt_sha256': marker['source_receipt_sha256'],
+                 'started_sha256': started_sha}, on_phase=mark_phase)
+            phase = 'retained_verify'
             _retained_review(root, prepared, request, packet)
         except BaseException as exc:
             # Preserve the first error. If storage cannot retain even this
             # failure record, visible admission still forbids every reimport.
             if present('REVIEW_STARTED.json'):
                 try:
+                    kind = type(exc).__name__
                     _put(root / 'REVIEW_FAILED.json', {**marker, 'kind': 'factory-simple-review-failed-v1',
-                                                      'error': type(exc).__name__})
+                        'error': kind if kind in REVIEW_ERROR_KINDS else 'OtherError',
+                        'phase': phase if phase in REVIEW_FAILURE_PHASES else 'unknown',
+                        'errno': _review_error_number(exc, 'errno'), 'winerror': _review_error_number(exc, 'winerror')})
                 except BaseException:
                     pass
             raise
