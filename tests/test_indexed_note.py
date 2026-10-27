@@ -2,6 +2,7 @@ import tempfile
 import unittest
 import sys
 import json
+import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -28,6 +29,9 @@ class IndexedNoteTests(unittest.TestCase):
             self.assertIs(settings["ensure_frontmatter_on_sync"], False)
             self.assertIs(settings["disable_permalinks"], True)
             self.assertIs(settings["format_on_save"], False)
+            for _ in range(20):
+                os.utime(path, None)
+                index._validate_configuration()
             settings["ensure_frontmatter_on_sync"] = True
             path.write_text(json.dumps(settings))
             with self.assertRaises(BasicMemoryError):

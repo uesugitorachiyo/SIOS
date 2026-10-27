@@ -11,7 +11,7 @@ import time
 
 from .basic_memory import BasicMemoryError, _check_node
 from .index_binding import load_index
-from .pathutils import native_path
+from .pathutils import native_path, stable_file_identity
 
 MAX_FILES = 10000
 MAX_FILE_BYTES = 16_000_000
@@ -20,10 +20,7 @@ DELETED = 'deleted'
 
 
 def _identity(info):
-    identity = (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
-    # Windows path and open-handle ctime can briefly disagree after a write.
-    # File identity, size and modification time remain checked before and after.
-    return identity if os.name == 'nt' else (*identity, info.st_ctime_ns)
+    return stable_file_identity(info)
 
 
 def _ordinary(info, *, directory):
