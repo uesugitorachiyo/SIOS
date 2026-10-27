@@ -12,6 +12,9 @@ from aios.store import Store
 
 class IndexRetryTests(unittest.TestCase):
     def setUp(self):
+        scan = patch('aios.index_reconcile.reconcile', return_value=0)
+        scan.start()
+        self.addCleanup(scan.stop)
         self.temp = tempfile.TemporaryDirectory(prefix='sios-index-retry-')
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name).resolve() / 'data'

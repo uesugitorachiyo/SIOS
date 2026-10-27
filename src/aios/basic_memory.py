@@ -17,6 +17,8 @@ import sqlite3
 import stat
 import subprocess
 
+from .pathutils import native_path
+
 _VERSION = "Basic Memory version: 0.23.2"
 _MARKER = ".aios-basic-memory-index.json"
 _PROJECT = re.compile(r"[a-z0-9][a-z0-9_-]{0,99}\Z")
@@ -59,6 +61,7 @@ def _check_node(path: Path) -> None:
 
 
 def _check_tree(root: Path) -> None:
+    root = native_path(root)
     _check_node(root)
     if root.exists():
         for directory, dirs, files in os.walk(root, followlinks=False):
@@ -422,7 +425,7 @@ class BasicMemoryIndex:
         except Exception:
             raise BasicMemoryError("scoped Basic Memory refresh unavailable") from None
 
-    def _indexed_checksums_match(self, expected: dict[str, str]) -> bool:
+    def _indexed_checksums_match(self, expected: dict[str, str | None]) -> bool:
         """Read the pinned local index without opening a write connection."""
         database = self.config_dir / 'memory.db'
         _check_node(database)
@@ -439,7 +442,7 @@ class BasicMemoryIndex:
                 for path, checksum in expected.items():
                     rows = db.execute('SELECT checksum FROM entity WHERE project_id=? AND file_path=?',
                                       (project_id, path)).fetchall()
-                    if rows != [(checksum,)]:
+                    if rows != ([] if checksum is None else [(checksum,)]):
                         return False
             return True
         except sqlite3.OperationalError:
@@ -447,7 +450,7 @@ class BasicMemoryIndex:
         except (sqlite3.Error, OSError, TypeError, ValueError):
             raise BasicMemoryError('index checksum observation unavailable') from None
 
-    async def wait_for_files(self, expected: dict[str, str], timeout: float = 7) -> bool:
+    async def wait_for_files(self, expected: dict[str, str | None], timeout: float = 7) -> bool:
         """Briefly run the existing scoped MCP sync and check exact indexed hashes."""
         if (not isinstance(expected, dict) or not expected or len(expected) > 2 or
                 not 0 < timeout <= 7):
@@ -455,8 +458,9 @@ class BasicMemoryIndex:
         for path, checksum in expected.items():
             if (not isinstance(path, str) or not path or '\\' in path or path.startswith('/') or
                     any(part in ('', '.', '..') for part in path.split('/')) or
-                    not path.endswith('.md') or not isinstance(checksum, str) or
-                    re.fullmatch(r'[0-9a-f]{64}', checksum) is None):
+                    not path.lower().endswith('.md') or
+                    (checksum is not None and (not isinstance(checksum, str) or
+                     re.fullmatch(r'[0-9a-f]{64}', checksum) is None))):
                 raise BasicMemoryError('invalid index observation target')
         self._ensure_index_root()
         self._validate_configuration()

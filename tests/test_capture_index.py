@@ -15,6 +15,9 @@ from aios.store import Store
 
 class CaptureIndexTests(unittest.TestCase):
     def setUp(self):
+        scan = patch('aios.index_reconcile.reconcile', return_value=0)
+        scan.start()
+        self.addCleanup(scan.stop)
         self.temp = tempfile.TemporaryDirectory(prefix='sios-capture-index-')
         self.addCleanup(self.temp.cleanup)
         self.store = Store(Path(self.temp.name).resolve() / 'data')
@@ -70,6 +73,14 @@ class CaptureIndexTests(unittest.TestCase):
             result = self.capture({'read', 'memory:write'})
         self.assertEqual(result['status'], 'captured')
         self.assertEqual(result['index_refresh'], {'ready': False, 'reason': 'not_confirmed'})
+
+    def test_unavailable_reconciliation_prevents_backend_sync(self):
+        with patch('aios.index_reconcile.reconcile', return_value=None), \
+                patch('aios.index_binding.load_index') as load:
+            result = self.capture({'read', 'memory:write'})
+        self.assertEqual(result['status'], 'captured')
+        self.assertFalse(result['index_refresh']['ready'])
+        load.assert_not_called()
 
     def test_capture_only_scope_does_not_gain_index_permission(self):
         with patch('aios.index_binding.load_index') as refresh:

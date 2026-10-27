@@ -104,6 +104,8 @@ class Store:
             db.execute('CREATE TABLE IF NOT EXISTS operations (request_id TEXT PRIMARY KEY, payload TEXT NOT NULL, intent TEXT NOT NULL, receipt TEXT NOT NULL, complete INTEGER NOT NULL DEFAULT 0)')
             from .index_retry import initialize as initialize_index_retry
             initialize_index_retry(db)
+            from .index_reconcile import initialize as initialize_index_reconcile
+            initialize_index_reconcile(db)
             from .completion import initialize
             initialize(db)
             if self.release_validation:
@@ -723,4 +725,6 @@ class Store:
             check = db.execute('PRAGMA quick_check').fetchone()[0]
             return {'ok':check == 'ok','database':check,'data_root':str(self.root),'timezone':str(self.timezone),
                     'pending_operations':db.execute('SELECT count(*) FROM operations WHERE complete=0').fetchone()[0],
-                    'index_retry_pending':db.execute('SELECT count(*) FROM index_retry_jobs').fetchone()[0]}
+                    'index_retry_pending':db.execute('SELECT count(*) FROM index_retry_jobs').fetchone()[0],
+                    'index_reconciliation':dict(zip(('status','checked_at','differences'),
+                        db.execute('SELECT status,checked_at,differences FROM index_reconcile_status WHERE id=1').fetchone()))}

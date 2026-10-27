@@ -93,9 +93,16 @@ the SIOS write journal. The response reports `index_refresh.ready` only after
 the bound index records the exact committed file checksums and the sources
 still match. If the first attempt fails or times out, the service retries
 pending work with bounded backoff, including after restart. `health` reports
-the number of pending retries. The retry worker indexes only previously
-authorized Memory writes; it does not collect conversations or extend access.
-Direct edits outside SIOS writes are not queued. The checksum observation
+the number of pending retries. The existing retry worker also checks the bound
+Memory tree for direct file changes approximately once per minute and queues
+stable differences. It compares hashes without saving source contents or
+changing Memory files. Linked or unreadable paths, scan resource limits, or a
+large unexpected number of missing files stop that scan and are reported in
+`health` as unavailable; no partial scan is treated as complete. A missing file
+may be removed from the derived index after a successful bounded scan, but the
+worker never deletes the original source. Changes are picked up after the
+service restarts if it was offline. The worker does not collect conversations
+or extend access. The checksum observation
 supports the pinned local Basic Memory index schema; an incompatible index
 remains pending and reports unconfirmed. A
 matching entity checksum does not prove that every full-text search projection

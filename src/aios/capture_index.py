@@ -41,6 +41,9 @@ def refresh_after_write(store, operation, result, *, scopes):
             if path == metadata.get('path') and metadata.get('revision') != revision:
                 raise ValueError('committed Memory source changed')
             expected[path.removeprefix('Memory/')] = revision
+        from .index_reconcile import reconcile
+        if reconcile(store) is None:
+            raise ValueError('Memory reconciliation unavailable')
         from .index_binding import load_index
         index = load_index(store.root)
         ready = asyncio.run(index.wait_for_files(expected, timeout=7)) is True

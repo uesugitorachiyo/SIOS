@@ -97,19 +97,25 @@ def retry_one(store, *, now=None):
     if job is None:
         return False
     path, revision, attempts = job
+    from .index_reconcile import reconcile
+    if reconcile(store) is None:
+        _defer(store, path, revision, attempts, time.time())
+        return True
     try:
-        if (not isinstance(path, str) or not path.startswith('Memory/') or not path.endswith('.md')
-                or not isinstance(revision, str) or re.fullmatch(r'[0-9a-f]{64}', revision) is None):
+        with store._connection() as db:
+            store._recover(db)
+        from .index_reconcile import DELETED, source_digest
+        if (not isinstance(path, str) or not path.startswith('Memory/') or not path.lower().endswith('.md')
+                or not isinstance(revision, str) or (revision != DELETED and re.fullmatch(r'[0-9a-f]{64}', revision) is None)):
             raise ValueError('invalid queued target')
-        current = store.read(path)
-        actual = current['revision']
+        actual = source_digest(store, path) or DELETED
         if actual != revision:
             _retarget(store, path, revision, actual, now)
             return True
         from .index_binding import load_index
         index = load_index(store.root)
-        ready = asyncio.run(index.wait_for_files({path.removeprefix('Memory/'): revision}, timeout=7))
-        if ready and store.read(path)['revision'] == revision:
+        ready = asyncio.run(index.wait_for_files({path.removeprefix('Memory/'): None if revision == DELETED else revision}, timeout=7))
+        if ready and (source_digest(store, path) or DELETED) == revision:
             complete(store, path, revision)
         else:
             _defer(store, path, revision, attempts, time.time())
@@ -120,8 +126,12 @@ def retry_one(store, *, now=None):
 
 class RetryWorker:
     """One service-owned worker with persistent jobs and bounded backoff."""
-    def __init__(self, store):
+    def __init__(self, store, *, scan_interval=60, poll_interval=2):
+        if not 0 < scan_interval <= 3600 or not 0 < poll_interval <= 60:
+            raise ValueError('invalid reconciliation interval')
         self.store = store
+        self.scan_interval = scan_interval
+        self.poll_interval = poll_interval
         self.stopping = threading.Event()
         self.thread = threading.Thread(target=self._run, name='sios-index-retry', daemon=True)
 
@@ -130,8 +140,14 @@ class RetryWorker:
         return self
 
     def _run(self):
-        while not self.stopping.wait(2):
+        next_scan = 0.0
+        while not self.stopping.wait(self.poll_interval):
             try:
+                now = time.monotonic()
+                if now >= next_scan:
+                    from .index_reconcile import reconcile
+                    reconcile(self.store)
+                    next_scan = time.monotonic() + self.scan_interval
                 retry_one(self.store)
             except Exception:
                 # Storage can recover later; keep the service alive without
