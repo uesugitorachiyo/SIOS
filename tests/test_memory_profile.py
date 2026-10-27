@@ -64,12 +64,12 @@ class Tests(unittest.TestCase):
         self.assertIn('snapshot', by_name['read_revision'].description)
 
     def test_existing_memory_read_retains_legacy_name_support(self):
-        self.gateway.invoke('memory_read', {'relative': 'Memory/notes/Unicode â€” source.md'})
+        self.gateway.invoke('memory_read', {'relative': 'Memory/notes/Unicode \u00e2\u20ac\u201d source.md'})
         self.assertEqual(self.client.calls[0][0], 'read')
 
     def test_shared_read_covers_memory_guidance_brain_and_missions(self):
         paths = [
-            'Memory/notes/Unicode â€” source.md', 'Guidance/index.json', 'AGENTS.md',
+            'Memory/notes/Unicode \u00e2\u20ac\u201d source.md', 'Guidance/index.json', 'AGENTS.md',
             '.agents/skills/aios-knowledge/SKILL.md', '.agents/skills/aios-mission/SKILL.md',
             '.agents/skills/aios-weekly-review/SKILL.md', 'Brain/AGENTS.md',
             'Brain/workflows/review-candidates.md', 'Brain/workflows/promote-memory.md',
@@ -79,7 +79,7 @@ class Tests(unittest.TestCase):
             'Missions/example/log.md', 'Missions/example/evidence/log-read-snapshot-abc/index.md',
             'Missions/example/evidence/nested/report.md',
             'Missions/example/evidence/Review V2.md',
-            'Missions/example/evidence/日本語/review.v2.md',
+            'Missions/example/evidence/caf\u00e9/review.v2.md',
         ]
         for path in paths:
             with self.subTest(path=path):
@@ -148,7 +148,7 @@ class Tests(unittest.TestCase):
         for path in ['Missions/example/mission.md', 'Missions/example/log.md',
                      'Missions/example/evidence/log-read-snapshot-abc/part-001.md',
                      'Missions/example/evidence/Review V2.md',
-                     'Missions/example/evidence/日本語/review.v2.md']:
+                     'Missions/example/evidence/caf\u00e9/review.v2.md']:
             with self.subTest(path=path):
                 self.assertFalse(self.gateway.invoke('read_revision', {'relative': path})['content_returned'])
         self.client.calls.clear()
