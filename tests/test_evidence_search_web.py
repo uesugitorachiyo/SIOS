@@ -130,7 +130,8 @@ class EvidenceWebTests(unittest.TestCase):
         try:
             old=self.server,self.port,self.csrf
             self.server,self.port,self.csrf=other,other.server_address[1],other.access_url.split('#',1)[1]
-            status,_,body=self.request('POST','/search',json.dumps({'query':'x'}),self.headers())
+            with patch('aios.evidence_search_web.MAX_SOURCE_BYTES', 4_000_000):
+                status,_,body=self.request('POST','/search',json.dumps({'query':'x'}),self.headers())
             result=json.loads(body);self.assertEqual(status,200);self.assertEqual(len(result['results']),1)
             self.assertTrue(result['truncated']);self.assertIn({'store':'all','reason':'response_limit'},result['warnings'])
             self.assertEqual(len(reads),2)

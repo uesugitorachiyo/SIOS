@@ -19,8 +19,8 @@ from .config import Config
 from .evidence_search import search_evidence
 
 MAX_REQUEST = 8192
-MAX_SOURCE_BYTES = 4_000_000
-MAX_RESPONSE_BYTES = 8_000_000
+MAX_SOURCE_BYTES = 10_000_000
+MAX_RESPONSE_BYTES = 16_000_000
 SEARCH_SECONDS = 45
 _SEARCH_DEADLINE = contextvars.ContextVar('sios_search_deadline', default=None)
 

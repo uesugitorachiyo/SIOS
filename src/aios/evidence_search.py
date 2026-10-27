@@ -105,6 +105,97 @@ def _terms(query):
     return out[:8]
 
 
+def _snapshot_source(call, path, revision):
+    """Reconstruct a current oversized Mission log from verified read snapshots."""
+    if not path.endswith('/log.md') or not isinstance(revision, str) or not re.fullmatch(r'[0-9a-f]{64}', revision):
+        raise ValueError('snapshot unavailable')
+    def current():
+        value = call('read_revision', {'relative': path})
+        if (not isinstance(value, dict) or value.get('path') != path or
+            value.get('revision') != revision or type(value.get('bytes')) is not int or
+            not 0 <= value['bytes'] <= 8_000_000):
+            raise ValueError('snapshot is stale or too large')
+        return value['bytes']
+    size = current()
+    root = path.rsplit('/', 1)[0] + '/evidence/log-read-snapshot-' + revision[:12]
+    index_path = root + '/index.md'
+    index = call('read', {'relative': index_path})
+    if (not isinstance(index, dict) or index.get('path') != index_path or
+        not isinstance(index.get('text'), str) or
+        hashlib.sha256(index['text'].encode('utf-8')).hexdigest() != index.get('revision')):
+        raise ValueError('invalid snapshot index')
+    text = index['text']
+    if ('Source path: `' + path + '`') not in text or ('Source SHA-256: `' + revision + '`') not in text:
+        raise ValueError('snapshot does not identify its source')
+    parts = re.findall(r'^\| \[(part-\d{3}\.md)\]\(part-\d{3}\.md\) \| (\d+) \| `([0-9a-f]{64})` \|$', text, re.MULTILINE)
+    if not parts or len(parts) > 16 or sum(int(row[1]) for row in parts) != size:
+        raise ValueError('invalid snapshot parts')
+    chunks = []
+    for number, (name, length, digest) in enumerate(parts, 1):
+        if name != f'part-{number:03d}.md':
+            raise ValueError('invalid snapshot order')
+        part_path = root + '/' + name
+        part = call('read', {'relative': part_path})
+        if not isinstance(part, dict) or part.get('path') != part_path or not isinstance(part.get('text'), str):
+            raise ValueError('snapshot part unavailable')
+        raw = part['text'].encode('utf-8')
+        if len(raw) != int(length) or hashlib.sha256(raw).hexdigest() != digest or part.get('revision') != digest:
+            raise ValueError('snapshot part changed')
+        chunks.append(raw)
+    combined = b''.join(chunks)
+    if len(combined) != size or hashlib.sha256(combined).hexdigest() != revision or current() != size:
+        raise ValueError('snapshot source changed')
+    return {'path': path, 'revision': revision, 'text': combined.decode('utf-8'),
+            'read_method': 'verified_snapshot'}
+
+
+def _snapshot_status(call, path, source, cache):
+    match = re.fullmatch(r'(Missions/[^/]+)/evidence/(log-read-snapshot-([0-9a-f]{12}))/[^/]+\.md', path)
+    if not match:
+        return None
+    mission, folder, prefix = match.groups()
+    root = mission + '/evidence/' + folder
+    if root not in cache:
+        status = 'unknown'
+        parts = {}
+        try:
+            index_path = root + '/index.md'
+            index = call('read', {'relative': index_path})
+            text = index.get('text') if isinstance(index, dict) else None
+            if (not isinstance(text, str) or index.get('path') != index_path or
+                hashlib.sha256(text.encode('utf-8')).hexdigest() != index.get('revision')):
+                raise ValueError('invalid index')
+            source_path = mission + '/log.md'
+            match_revision = re.search(r'^Source SHA-256: `([0-9a-f]{64})`$', text, re.MULTILINE)
+            if (not match_revision or not match_revision.group(1).startswith(prefix) or
+                ('Source path: `' + source_path + '`') not in text):
+                raise ValueError('invalid source')
+            current = call('read_revision', {'relative': source_path})
+            if not isinstance(current, dict) or current.get('path') != source_path or not re.fullmatch(r'[0-9a-f]{64}', str(current.get('revision', ''))):
+                raise ValueError('unavailable source revision')
+            status = ('index references current log; full snapshot unchecked'
+                      if current['revision'] == match_revision.group(1)
+                      else 'index references older log; full snapshot unchecked')
+            rows = re.findall(r'^\| \[(part-\d{3}\.md)\]\(part-\d{3}\.md\) \| (\d+) \| `([0-9a-f]{64})` \|$', text, re.MULTILINE)
+            if len({row[0] for row in rows}) != len(rows):
+                raise ValueError('duplicate snapshot part')
+            parts = {name: (int(length), digest) for name, length, digest in rows}
+        except Exception:
+            status = 'unknown'
+            parts = {}
+        cache[root] = (status, parts)
+    status, parts = cache[root]
+    if status == 'unknown':
+        return status
+    name = path.rsplit('/', 1)[-1]
+    if name == 'index.md':
+        return status
+    expected = parts.get(name)
+    if expected is None or expected != (len(source['text'].encode('utf-8')), source['revision']):
+        return 'integrity mismatch'
+    return status
+
+
 def search_evidence(call, query, *, limit=10):
     """Return bounded full source records and explicit coverage uncertainty."""
     if not isinstance(query, str) or not query.strip() or len(query) > 1000:
@@ -115,6 +206,7 @@ def search_evidence(call, query, *, limit=10):
     terms = _terms(query)
     results, errors, warnings, seen = [], [], [], set()
     queues = {}
+    snapshot_cache = {}
     truncated = False
     for store in ('brain', 'memory', 'missions'):
         hits = []
@@ -186,7 +278,12 @@ def search_evidence(call, query, *, limit=10):
                 continue
             seen.add(path)
             try:
-                source = call('read', {'relative': path})
+                try:
+                    source = call('read', {'relative': path})
+                except Exception:
+                    if store != 'missions':
+                        raise
+                    source = _snapshot_source(call, path, hit.get('revision'))
                 if (not isinstance(source, dict) or source.get('path') != path or
                     not isinstance(source.get('text'), str) or not isinstance(source.get('revision'), str)):
                     raise ValueError('invalid read response')
@@ -211,7 +308,8 @@ def search_evidence(call, query, *, limit=10):
             else:
                 drift = old_revision != source['revision'] if old_revision is not None else None
             row = {'store': store, 'path': path, 'revision': source['revision'],
-                   'text': source['text'], 'classification': _kind(meta),
+                   'text': source['text'], 'read_method': source.get('read_method', 'full_read'), 'classification': _kind(meta),
+                   'snapshot_status': _snapshot_status(call, path, source, snapshot_cache) if store == 'missions' else None,
                    'declared_status': meta.get('status'), 'evidence_status': meta.get('evidence_status'),
                    'recorded_at': meta.get('recorded_at'), 'last_touched': meta.get('last_touched'),
                    'decision_date': meta.get('decision_date'), 'verified_at': meta.get('verified_at'),

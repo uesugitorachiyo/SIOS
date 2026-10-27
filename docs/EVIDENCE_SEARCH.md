@@ -59,11 +59,22 @@ date is flagged using the local computer's date.
 
 A Memory index may lag. A result limit, unavailable store, source-read error,
 or unverified search revision is disclosed rather than treated as proof of
-absence. If full Mission search fails, the tool may search a bounded selection
+absence. Mission search includes Markdown histories up to 16 million bytes per
+file and 100 million bytes per search. Exceeding either limit reports an
+incomplete search. The ordinary full-read limit remains two million bytes. For a larger
+Mission log, the viewer can reconstruct an existing versioned snapshot only
+when its parts, combined content and current source revision all match. A
+missing or stale snapshot is reported as an unavailable source. If full
+Mission search fails, the tool may search a bounded selection
 of registered Mission bodies instead; it labels that incomplete fallback and
 does not claim to search every history or attachment. The per-search source
-content budget is four million UTF-8 bytes; results exceeding the limit are
+content budget is ten million UTF-8 bytes; results exceeding the limit are
 omitted and the screen reports truncation.
+
+Search results from versioned log snapshot files show whether the index refers
+to the current or an older log, or whether that comparison is unknown. Individual
+parts are checked against the index. This does not verify the entire snapshot;
+an integrity mismatch is shown if an individual part disagrees with its index.
 
 The content budget is applied after a client response is received. A single
 large MCP response can therefore temporarily use more memory. Search aims to

@@ -40,6 +40,8 @@ class NotFoundError(FileNotFoundError):
 
 
 MAX_BYTES = 2_000_000
+MAX_MISSION_SEARCH_BYTES = 16_000_000
+MAX_MISSION_SEARCH_TOTAL_BYTES = 100_000_000
 MAX_MISSION_CATALOG_ITEMS = 512
 MAX_MISSION_CATALOG_BYTES = 65_536
 MAX_READ_REVISION_BYTES = 128 * 1024 * 1024
@@ -159,15 +161,15 @@ class Store:
             self._check_node(current)
         return current
 
-    def _read_bytes(self, relative):
+    def _read_bytes(self, relative, *, limit=MAX_BYTES):
         path = self._read_path(relative)
         if not path.exists():
             return None
         if not path.is_file():
             raise ValidationError('Expected an ordinary file')
         with path.open('rb') as stream:
-            data = stream.read(MAX_BYTES + 1)
-        if len(data) > MAX_BYTES:
+            data = stream.read(limit + 1)
+        if len(data) > limit:
             raise ValidationError('State file exceeds size limit')
         return data
 
@@ -501,6 +503,7 @@ class Store:
         with self._connection() as db:
             self._recover(db)
             results = []
+            mission_bytes = 0
             base = self._read_path(roots[store])
             if not base.is_dir():
                 raise ValidationError('Search root unavailable')
@@ -519,9 +522,13 @@ class Store:
                     if name.startswith('.') or not name.endswith('.md'):
                         continue
                     relative = (Path(directory) / name).relative_to(self.root).as_posix()
-                    data = self._read_bytes(relative)
+                    data = self._read_bytes(relative, limit=MAX_MISSION_SEARCH_BYTES if store == 'missions' else MAX_BYTES)
                     if data is None:
                         raise NotFoundError(relative)
+                    if store == 'missions':
+                        mission_bytes += len(data)
+                        if mission_bytes > MAX_MISSION_SEARCH_TOTAL_BYTES:
+                            raise ValidationError('Mission search exceeds total size limit')
                     text = data.decode('utf-8')
                     index = text.casefold().find(query.casefold())
                     if index >= 0:
