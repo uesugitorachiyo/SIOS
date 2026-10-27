@@ -1,6 +1,6 @@
 # Local Factory
 
-**Experimental feature branch:** This code is not production qualified. Native macOS process verification is blocked in the tested environment by a `sysctl` permission error (`EPERM`). Windows has partial test evidence, but independent workflow review blocked verification security because the changed checker verified its own candidate. The changed checker itself is not established by that workflow. Cross-host qualification has not been completed.
+**Experimental feature branch:** This code is not production qualified. A macOS test supervisor encountered a `sysctl` permission error (`EPERM`) before the Factory test started, so native Factory behavior remains unverified. On Windows, a separate run passed prepare and check, but importing its independent review failed with `PermissionError`; the failing operation was not recorded, and the cause remains unknown. An earlier workflow also used the changed checker to verify its own candidate, which does not independently establish that checker. Cross-host qualification has not been completed.
 
 Factory prepares an isolated copy, checks the actual changed files, and records an independently supplied review. It does not run a model, fetch credentials, publish, or execute untrusted code safely. Candidate code runs with the local user's permissions.
 
