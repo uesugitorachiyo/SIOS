@@ -10,7 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ROOT_FILES = {
-    ".gitignore", "LICENSE", "README.md", "THIRD_PARTY_NOTICES.md",
+    ".gitattributes", ".gitignore", "LICENSE", "README.md", "THIRD_PARTY_NOTICES.md",
     "pyproject.toml", "requirements.basic-memory.lock",
 }
 SOURCE_PREFIXES = ("src/aios/", "docs/", "templates/", "tests/", "scripts/")
