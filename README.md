@@ -19,8 +19,8 @@ their limits.
 
 Start with the [clean-instance guide and workflow status](docs/CLEAN_START.md).
 It distinguishes available source features from optional setup and remaining
-qualification. The [minimal coding-handoff design](docs/SOFTWARE_FACTORY_DESIGN.md)
-is a proposal; its helper has not been implemented.
+qualification. The experimental [Factory usage guide](docs/FACTORY_USAGE.md)
+describes its local prepare, check, and report workflow.
 
 Python 3.12 or newer is required. Create a virtual environment, install the
 project with the optional features you need, then run `sios --help`.
@@ -55,6 +55,8 @@ revisions. Review material under `Brain/working/` and `Brain/inbox/` is
 noncanonical. `catalog(store="brain-review")` lists bounded pending paths for
 review; `read_revision` returns a bounded Mission Markdown hash and byte count
 without returning the body.
+
+For a local evidence-linked search screen, see [Evidence Search](docs/EVIDENCE_SEARCH.md).
 
 See [domain boundaries](docs/DOMAIN_BOUNDARIES.md),
 [conversation capture](docs/CONVERSATION_CAPTURE.md),

@@ -49,7 +49,8 @@ def main() -> int:
         ):
             issues.append(f"{name}: private or generated path")
             continue
-        if relative.suffix not in ALLOWED_SUFFIXES and name not in ROOT_FILES:
+        if (relative.suffix not in ALLOWED_SUFFIXES and name not in ROOT_FILES
+                and name != "src/aios/evidence_search_ui.html"):
             issues.append(f"{name}: unexpected file type")
             continue
         if path.is_symlink() or not path.is_file():
