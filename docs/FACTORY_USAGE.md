@@ -3,7 +3,9 @@
 **Retired from the standard workflow:** Further Factory development is stopped.
 Normal agent development, project tests, and proportionate independent review
 are the default. The Factory console entry point and optional installation
-extra are no longer registered by this version of the package. The source and
+extra are no longer registered, and its modules are omitted from clean builds.
+Old build directories can contain stale files, so build from a clean source
+directory. The source and
 this historical guide remain in Git; the commands and install instructions
 below describe the earlier version and do not apply to new installations.
 

@@ -30,6 +30,7 @@ sios-evidence-search = "aios.evidence_search_web:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+exclude = ["aios.factory", "aios.factory.*"]
 
 [tool.setuptools]
 include-package-data = false
