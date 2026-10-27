@@ -31,3 +31,13 @@ PowerShell execution policy. When the connection or central service is down,
 the drive or search index can be temporarily unavailable. The status reports
 the launcher's last observed mount state; it is not a guarantee that the
 network or search index is currently available.
+
+The launcher allows extra time for a slow Windows sign-in and, if the initial
+mount times out, stops only the SSHFS process tree it started before retrying.
+An occupied drive is never replaced; investigate `drive_in_use` before taking
+any action against another process or drive.
+
+The tested SSHFS-Win command-line runtime cannot mount a remote root path
+that combines non-ASCII characters with whitespace; the launcher rejects
+such a configuration instead of repeatedly failing. Unicode file and folder
+names containing spaces under a supported mounted root were tested separately.

@@ -30,6 +30,10 @@ def read_config(path: Path) -> tuple[str, str, str]:
         ord(c) < 32 or c in "\\:" for c in remote
     ) or any(part in {".", ".."} for part in remote.split("/")) or str(PurePosixPath(remote)) != remote:
         raise ValueError("Invalid absolute remote path")
+    # SSHFS-Win's Cygwin command-line handling retains surrounding quotes
+    # for a remote argument containing both Unicode and whitespace.
+    if any(ord(c) > 127 for c in remote) and any(c.isspace() for c in remote):
+        raise ValueError("SSHFS-Win cannot mount a remote root combining Unicode and whitespace")
     if not isinstance(drive, str) or not re.fullmatch(r"[D-Z]:", drive):
         raise ValueError("Drive must be an uppercase letter from D: to Z:")
     return alias, remote, drive
@@ -45,6 +49,22 @@ def write_status(path: Path, state: str) -> None:
         pass
 
 
+def stop_owned_process_tree(process: subprocess.Popen) -> bool:
+    """Stop only the launcher-owned SSHFS process and its descendants."""
+    if process.poll() is not None:
+        return True
+    try:
+        result = subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        process.wait(timeout=10)
+        return result.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("config", type=Path)
@@ -54,6 +74,7 @@ def main() -> int:
     try:
         alias, remote, drive = read_config(args.config)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
+        write_status(args.config.parent / "status.json", "invalid_configuration")
         print(f"Invalid configuration: {exc}", file=sys.stderr)
         return 2
     status = args.config.parent / "status.json"
@@ -78,7 +99,7 @@ def main() -> int:
         "-o", "StrictHostKeyChecking=yes", "-o", "BatchMode=yes",
         "-o", "reconnect", "-o", "dir_cache=no", "-o", "idmap=user",
         "-o", "uid=-1,gid=-1", "-o", "ServerAliveInterval=15",
-        "-o", "ServerAliveCountMax=3",
+        "-o", "ServerAliveCountMax=3", "-o", "ConnectTimeout=10",
     ]
     bit = 1 << (ord(drive[0]) - ord("A"))
     try:
@@ -96,7 +117,10 @@ def main() -> int:
                 write_status(status, "launch_failed")
                 time.sleep(20)
                 continue
-            deadline = time.monotonic() + 20
+            # Startup can be slow while Windows is logging in. Killing only
+            # sshfs-win.exe leaves its filesystem child running and can strand
+            # the drive, so give it time and stop the entire owned tree.
+            deadline = time.monotonic() + 90
             while process.poll() is None and time.monotonic() < deadline:
                 if kernel.GetLogicalDrives() & bit:
                     write_status(status, "connected")
@@ -105,8 +129,9 @@ def main() -> int:
                 time.sleep(0.25)
             else:
                 if process.poll() is None:
-                    process.terminate()
-                    process.wait(timeout=10)
+                    if not stop_owned_process_tree(process):
+                        write_status(status, "cleanup_failed")
+                        return 1
             write_status(status, "disconnected_retrying")
             time.sleep(20)
     finally:
