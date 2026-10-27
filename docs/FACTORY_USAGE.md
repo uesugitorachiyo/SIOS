@@ -1,5 +1,12 @@
 # Local Factory
 
+**Retired from the standard workflow:** Further Factory development is stopped.
+Normal agent development, project tests, and proportionate independent review
+are the default. The Factory console entry point and optional installation
+extra are no longer registered by this version of the package. The source and
+this historical guide remain in Git; the commands and install instructions
+below describe the earlier version and do not apply to new installations.
+
 **Experimental feature branch:** This code is not production qualified. On the tested macOS and Windows hosts, the installed console command completed prepare, check, and an independently reviewed report at commit `7c3b0feff9aed6f81273fb026a411d4bac10b5ef`. The macOS run checked three tests; the Windows run checked eleven tests and four subtests. These are bounded trusted-code exercises, not exhaustive platform or security qualification. The macOS process monitor samples descendants and cannot exclude an unobserved escape.
 
 Earlier attempts remain separate: a macOS test supervisor encountered `EPERM` before its Factory test started; a Windows review import failed with `PermissionError`, with its failing operation and cause unrecorded. An earlier workflow also used the changed checker to verify its own candidate, which does not independently establish that checker. The later successful runs do not establish the causes of those failures.

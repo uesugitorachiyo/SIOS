@@ -1,5 +1,8 @@
 # Local Factory design
 
+**Historical design:** Factory is retired from the standard workflow and
+further development is stopped. Its source and history remain in Git.
+
 **Experimental feature branch:** The tested macOS environment blocked native process verification with `sysctl` `EPERM`. Windows has partial test evidence, while independent workflow review blocked verification security because the changed checker verified itself. This branch is not cross-host qualified or approved for production use.
 
 The Factory is a small evidence tool with three operations: prepare an isolated baseline and work copy, check the exact candidate under fixed limits, and report a separately obtained review. The normal developer or agent owns planning and implementation. The Factory does not create model sessions or decide that a reviewer is independent.

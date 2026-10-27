@@ -19,7 +19,6 @@ agent = ["mcp==2.3.0"]
 index = ["basic-memory==0.23.2"]
 backup = ["cryptography==50.0.2", "psutil==7.2.2"]
 verification = ["jsonschema==4.25.1", "rfc3339-validator==0.1.4"]
-factory = ["psutil==7.2.2; sys_platform == 'darwin'"]
 
 [project.urls]
 Repository = "https://github.com/uesugitorachiyo/SIOS"
@@ -27,7 +26,6 @@ Repository = "https://github.com/uesugitorachiyo/SIOS"
 [project.scripts]
 sios = "aios.cli:main"
 sios-memory = "aios.memory_mcp:main"
-sios-factory = "aios.factory.cli:main"
 sios-evidence-search = "aios.evidence_search_web:main"
 
 [tool.setuptools.packages.find]

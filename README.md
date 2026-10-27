@@ -19,8 +19,8 @@ their limits.
 
 Start with the [clean-instance guide and workflow status](docs/CLEAN_START.md).
 It distinguishes available source features from optional setup and remaining
-qualification. The experimental [Factory usage guide](docs/FACTORY_USAGE.md)
-describes its local prepare, check, and report workflow.
+qualification. Factory development and routine use have stopped; its source
+and [historical usage guide](docs/FACTORY_USAGE.md) remain for reference.
 
 Python 3.12 or newer is required. Create a virtual environment, install the
 project with the optional features you need, then run `sios --help`.
