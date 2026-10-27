@@ -88,13 +88,16 @@ an integrity mismatch is shown if an individual part disagrees with its index.
 When the SIOS service includes automatic write indexing, a successful selective
 capture, note write or routine publication attempts a short, on-demand refresh
 using the existing index binding. The authenticated caller must already have
-read and index refresh authority. The response reports `index_refresh.ready`
-only after the bound index records the exact committed file checksums and the
-sources still match. A failure or timeout leaves the committed files intact and
-reports an unconfirmed refresh. A retry of the same write can retry the refresh.
-This does not start a persistent collector, extend access, or cover edits made
-outside SIOS write operations. The checksum observation supports the pinned
-local Basic Memory index schema; an incompatible index reports unconfirmed. A
+read and index refresh authority. A path and revision are durably queued with
+the SIOS write journal. The response reports `index_refresh.ready` only after
+the bound index records the exact committed file checksums and the sources
+still match. If the first attempt fails or times out, the service retries
+pending work with bounded backoff, including after restart. `health` reports
+the number of pending retries. The retry worker indexes only previously
+authorized Memory writes; it does not collect conversations or extend access.
+Direct edits outside SIOS writes are not queued. The checksum observation
+supports the pinned local Basic Memory index schema; an incompatible index
+remains pending and reports unconfirmed. A
 matching entity checksum does not prove that every full-text search projection
 has committed at the same revision, so use source search and coverage notices.
 

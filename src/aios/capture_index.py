@@ -25,11 +25,11 @@ def refresh_after_write(store, operation, result, *, scopes):
     if not ({'memory:write', 'memory:index_refresh'} & set(scopes)) or 'read' not in scopes:
         result['index_refresh'] = {'ready': False, 'reason': 'index_scope_unavailable'}
         return result
+    expected = {}
     try:
         paths = [metadata.get('path')]
         if operation == 'publish':
             paths.append(metadata.get('journal'))
-        expected = {}
         for path in paths:
             if (not isinstance(path, str) or not path.startswith('Memory/') or
                     not path.endswith('.md')):
@@ -47,7 +47,20 @@ def refresh_after_write(store, operation, result, *, scopes):
         if ready:
             ready = all(store.read('Memory/' + path).get('revision') == checksum
                         for path, checksum in expected.items())
+        if ready:
+            from .index_retry import complete
+            for path, revision in expected.items():
+                complete(store, 'Memory/' + path, revision)
         result['index_refresh'] = {'ready': ready, 'reason': None if ready else 'not_confirmed'}
     except Exception:
         result['index_refresh'] = {'ready': False, 'reason': 'refresh_unavailable'}
+    if not result['index_refresh']['ready']:
+        try:
+            from .index_retry import enqueue_if_absent
+            for path, revision in expected.items():
+                enqueue_if_absent(store, 'Memory/' + path, revision)
+            if not expected:
+                enqueue_if_absent(store, metadata.get('path'), metadata.get('revision'))
+        except Exception:
+            result['index_refresh']['retry'] = 'unavailable'
     return result

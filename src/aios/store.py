@@ -102,6 +102,8 @@ class Store:
         self._path('Database').mkdir(exist_ok=True)
         with self._connection() as db:
             db.execute('CREATE TABLE IF NOT EXISTS operations (request_id TEXT PRIMARY KEY, payload TEXT NOT NULL, intent TEXT NOT NULL, receipt TEXT NOT NULL, complete INTEGER NOT NULL DEFAULT 0)')
+            from .index_retry import initialize as initialize_index_retry
+            initialize_index_retry(db)
             from .completion import initialize
             initialize(db)
             if self.release_validation:
@@ -320,6 +322,8 @@ class Store:
             receipt = {'request_id': request_id, 'result': result}
             db.execute('INSERT INTO operations(request_id,payload,intent,receipt) VALUES(?,?,?,?)',
                        (request_id, identity, _json(intent), _json(receipt)))
+            from .index_retry import enqueue_intents
+            enqueue_intents(db, intent)
             # This durable commit MUST precede every filesystem mutation.
             db.commit()
             db.execute('BEGIN IMMEDIATE')
@@ -718,4 +722,5 @@ class Store:
             self._recover(db)
             check = db.execute('PRAGMA quick_check').fetchone()[0]
             return {'ok':check == 'ok','database':check,'data_root':str(self.root),'timezone':str(self.timezone),
-                    'pending_operations':db.execute('SELECT count(*) FROM operations WHERE complete=0').fetchone()[0]}
+                    'pending_operations':db.execute('SELECT count(*) FROM operations WHERE complete=0').fetchone()[0],
+                    'index_retry_pending':db.execute('SELECT count(*) FROM index_retry_jobs').fetchone()[0]}
