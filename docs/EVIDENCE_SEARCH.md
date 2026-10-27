@@ -85,6 +85,19 @@ to the current or an older log, or whether that comparison is unknown. Individua
 parts are checked against the index. This does not verify the entire snapshot;
 an integrity mismatch is shown if an individual part disagrees with its index.
 
+When the SIOS service includes automatic write indexing, a successful selective
+capture, note write or routine publication attempts a short, on-demand refresh
+using the existing index binding. The authenticated caller must already have
+read and index refresh authority. The response reports `index_refresh.ready`
+only after the bound index records the exact committed file checksums and the
+sources still match. A failure or timeout leaves the committed files intact and
+reports an unconfirmed refresh. A retry of the same write can retry the refresh.
+This does not start a persistent collector, extend access, or cover edits made
+outside SIOS write operations. The checksum observation supports the pinned
+local Basic Memory index schema; an incompatible index reports unconfirmed. A
+matching entity checksum does not prove that every full-text search projection
+has committed at the same revision, so use source search and coverage notices.
+
 The content budget is applied after a client response is received. A single
 large MCP response can therefore temporarily use more memory. Search aims to
 stop after 45 seconds and reports an incomplete result, but a direct-client

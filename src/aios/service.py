@@ -97,7 +97,9 @@ def dispatch(store: Store, operation: str, params: dict[str, Any], *,
             raise ValidationError("Invalid capture parameters")
         try:
             data = parse_capture_json(params["request_json"])
-            return capture_with_store(data, store=store, actor=actor)
+            result = capture_with_store(data, store=store, actor=actor)
+            from .capture_index import refresh_after_write
+            return refresh_after_write(store, operation, result, scopes=scopes)
         except (ConflictError, RecoveryError):
             raise
         except (ValueError, TypeError, UnicodeError, RecursionError):
@@ -123,6 +125,9 @@ def dispatch(store: Store, operation: str, params: dict[str, Any], *,
     except TypeError as exc:
         raise ValidationError("Invalid operation parameters") from exc
     result = method(**supplied)
+    if operation in {"memory_write", "publish"}:
+        from .capture_index import refresh_after_write
+        result = refresh_after_write(store, operation, result, scopes=scopes)
     if operation == "memory_index_search":
         from .index_binding import add_read_paths
         result = add_read_paths(store, result)
