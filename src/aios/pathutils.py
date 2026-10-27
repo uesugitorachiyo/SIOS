@@ -22,3 +22,9 @@ def stable_file_identity(info):
     identity = (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
     # Windows path and open-handle ctime can temporarily disagree after writes.
     return identity if os.name == 'nt' else (*identity, info.st_ctime_ns)
+
+
+def file_snapshot_identity(info):
+    """Compare timestamps within the same path or open-handle observation."""
+    identity = stable_file_identity(info)
+    return (*identity, info.st_ctime_ns) if os.name == 'nt' else identity

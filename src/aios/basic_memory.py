@@ -17,7 +17,7 @@ import sqlite3
 import stat
 import subprocess
 
-from .pathutils import native_path, stable_file_identity
+from .pathutils import file_snapshot_identity, native_path, stable_file_identity
 
 _VERSION = "Basic Memory version: 0.23.2"
 _MARKER = ".aios-basic-memory-index.json"
@@ -291,8 +291,8 @@ class BasicMemoryIndex:
                     if not stat.S_ISREG(held.st_mode) or stable_file_identity(named) != stable_file_identity(held):
                         raise ValueError()
                     raw = stream.read(1048577)
-                    if (len(raw) > 1048576 or stable_file_identity(held) != stable_file_identity(os.fstat(stream.fileno()))
-                            or stable_file_identity(held) != stable_file_identity(config.lstat())):
+                    if (len(raw) > 1048576 or file_snapshot_identity(held) != file_snapshot_identity(os.fstat(stream.fileno()))
+                            or file_snapshot_identity(named) != file_snapshot_identity(config.lstat())):
                         raise ValueError()
                     if durable:
                         os.fsync(stream.fileno())

@@ -11,7 +11,7 @@ import time
 
 from .basic_memory import BasicMemoryError, _check_node
 from .index_binding import load_index
-from .pathutils import native_path, stable_file_identity
+from .pathutils import file_snapshot_identity, native_path, stable_file_identity
 
 MAX_FILES = 10000
 MAX_FILE_BYTES = 16_000_000
@@ -20,7 +20,7 @@ DELETED = 'deleted'
 
 
 def _identity(info):
-    return stable_file_identity(info)
+    return file_snapshot_identity(info)
 
 
 def _ordinary(info, *, directory):
@@ -51,7 +51,7 @@ def source_digest(store, relative):
     fd = os.open(path, flags)
     try:
         opened = os.fstat(fd)
-        if _identity(before) != _identity(opened):
+        if stable_file_identity(before) != stable_file_identity(opened):
             raise ValueError('Memory file changed while opening')
         digest = hashlib.sha256()
         with os.fdopen(fd, 'rb', closefd=False) as stream:
@@ -60,7 +60,7 @@ def source_digest(store, relative):
                 if not chunk:
                     break
                 digest.update(chunk)
-        if _identity(opened) != _identity(os.fstat(fd)) or _identity(opened) != _identity(path.lstat()):
+        if _identity(opened) != _identity(os.fstat(fd)) or _identity(before) != _identity(path.lstat()):
             raise ValueError('Memory file changed during scan')
         return digest.hexdigest()
     finally:
