@@ -2,7 +2,7 @@
 
 Evidence Search is a read-only local browser interface for a configured SIOS
 client. It searches Brain and Missions through the existing `search` operation
-and Memory through the existing index, then reads the original Markdown and
+and combines the Memory index with direct Memory source search, then reads the original Markdown and
 checks its SHA-256 revision before showing it. It does not generate answers,
 modify a SIOS record, install a service, or send content to an AI provider.
 Existing SIOS read operations may recover a previously journaled write.
@@ -57,7 +57,13 @@ unknown. A matching revision proves only byte consistency with the read
 response, not that the statement is true or current. A past review or stale
 date is flagged using the local computer's date.
 
-A Memory index may lag. A result limit, unavailable store, source-read error,
+A Memory index may lag, so direct exact-text source search can find matching
+records that have not yet been indexed. The index can also return matches that
+the exact-text source search does not find. If either search is unavailable,
+the screen reports the reduced coverage. The index may return only its first
+matches; the screen reports that limitation even when source search succeeds.
+Direct source search depends on the configured client and can fail when a source
+is too large or cannot be read. A result limit, unavailable store, source-read error,
 or unverified search revision is disclosed rather than treated as proof of
 absence. Mission search includes Markdown histories up to 16 million bytes per
 file and 100 million bytes per search. Exceeding either limit reports an
@@ -67,9 +73,12 @@ when its parts, combined content and current source revision all match. A
 missing or stale snapshot is reported as an unavailable source. If full
 Mission search fails, the tool may search a bounded selection
 of registered Mission bodies instead; it labels that incomplete fallback and
-does not claim to search every history or attachment. The per-search source
-content budget is ten million UTF-8 bytes; results exceeding the limit are
-omitted and the screen reports truncation.
+does not claim to search every history or attachment. Search candidates are
+limited to 5,000 per store and 30 are processed per page. Use **Load more
+results** to continue. Each page has a ten-million-byte source content budget;
+if the budget or time limit is reached, the screen reports it and offers a
+continuation when progress is possible. If the candidate list changes between
+pages, run the search again. Pages are not an atomic snapshot of the stores.
 
 Search results from versioned log snapshot files show whether the index refers
 to the current or an older log, or whether that comparison is unknown. Individual

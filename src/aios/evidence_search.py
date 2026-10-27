@@ -12,6 +12,11 @@ _PREFIX = {'brain': 'Brain/brain/', 'memory': 'Memory/', 'missions': 'Missions/'
 _DATE_KEYS = ('recorded_at', 'review_due', 'stale_after', 'last_touched')
 _META_KEYS = ('status', 'type', 'recorded_at', 'review_due', 'stale_after', 'last_touched',
               'source_type', 'evidence_status', 'adoption_status', 'decision_date', 'verified_at')
+_MAX_CANDIDATES = 5000
+
+
+class SearchBudgetExceeded(Exception):
+    """A page ran out of its bounded time or source-content budget."""
 
 
 def _path_ok(path, prefix):
@@ -180,6 +185,8 @@ def _snapshot_status(call, path, source, cache):
             if len({row[0] for row in rows}) != len(rows):
                 raise ValueError('duplicate snapshot part')
             parts = {name: (int(length), digest) for name, length, digest in rows}
+        except SearchBudgetExceeded:
+            raise
         except Exception:
             status = 'unknown'
             parts = {}
@@ -196,42 +203,69 @@ def _snapshot_status(call, path, source, cache):
     return status
 
 
-def search_evidence(call, query, *, limit=10):
+def search_evidence(call, query, *, limit=10, offset=0, fingerprint=None):
     """Return bounded full source records and explicit coverage uncertainty."""
     if not isinstance(query, str) or not query.strip() or len(query) > 1000:
         raise ValueError('query must be nonempty text')
     if type(limit) is not int or not 1 <= limit <= 50:
         raise ValueError('limit must be an integer from 1 to 50')
+    if type(offset) is not int or not 0 <= offset <= 3 * _MAX_CANDIDATES:
+        raise ValueError('invalid offset')
+    if (offset and (not isinstance(fingerprint, str) or not re.fullmatch(r'[0-9a-f]{64}', fingerprint))) or (not offset and fingerprint is not None):
+        raise ValueError('invalid result-set fingerprint')
     query = query.strip()
     terms = _terms(query)
     results, errors, warnings, seen = [], [], [], set()
     queues = {}
     snapshot_cache = {}
     truncated = False
+    index_limited = False
     for store in ('brain', 'memory', 'missions'):
         hits = []
         successful = False
         failed = False
+        direct_memory_ok = True
         try:
             for term in terms:
                 if store == 'memory':
-                    payload = call('memory_index_search', {'query': term})
-                    if isinstance(payload, dict) and isinstance(payload.get('result'), dict):
-                        payload = payload['result']
-                    if not isinstance(payload, dict) or not isinstance(payload.get('results'), list):
-                        raise ValueError('invalid index response')
-                    hits.extend(payload['results'])
-                    truncated = truncated or payload.get('has_more') is True
+                    try:
+                        payload = call('memory_index_search', {'query': term})
+                        if isinstance(payload, dict) and isinstance(payload.get('result'), dict):
+                            payload = payload['result']
+                        if (not isinstance(payload, dict) or not isinstance(payload.get('results'), list)
+                                or type(payload.get('has_more')) is not bool):
+                            raise ValueError('invalid index response')
+                        hits.extend(payload['results'])
+                        index_limited = index_limited or payload['has_more']
+                        successful = True
+                    except SearchBudgetExceeded:
+                        raise
+                    except Exception:
+                        failed = True
+                    try:
+                        found = call('search', {'store': 'memory', 'query': term})
+                        if not isinstance(found, list):
+                            raise ValueError('invalid direct search response')
+                        hits.extend({**hit, 'read_path': hit.get('path')} if isinstance(hit, dict) else hit for hit in found)
+                        successful = True
+                    except SearchBudgetExceeded:
+                        raise
+                    except Exception:
+                        direct_memory_ok = False
                 else:
                     found = call('search', {'store': store, 'query': term})
                     if not isinstance(found, list):
                         raise ValueError('invalid search response')
                     hits.extend(found)
-                successful = True
+                    successful = True
+        except SearchBudgetExceeded:
+            raise
         except Exception:
             failed = True
+        if failed:
             errors.append({'store': store, 'reason': 'search_unavailable'})
-        if store == 'memory' and successful:
+        if store == 'memory' and not direct_memory_ok:
+            errors.append({'store': 'memory', 'reason': 'direct_search_unavailable'})
             warnings.append({'store': 'memory', 'reason': 'index_may_lag'})
         if failed and store == 'missions':
             try:
@@ -244,6 +278,8 @@ def search_evidence(call, query, *, limit=10):
                 paths = sorted(paths, key=lambda path: (not any(term.casefold() in path.casefold() for term in terms), path))
                 hits.extend({'path': path, '_catalog': True} for path in paths)
                 warnings.append({'store': 'missions', 'reason': 'mission_catalog_partial'})
+            except SearchBudgetExceeded:
+                raise
             except Exception:
                 pass
         if not successful and not hits:
@@ -256,70 +292,96 @@ def search_evidence(call, query, *, limit=10):
                     continue
                 known.add(path)
             unique.append(hit)
-        queues[store] = deque(unique[:limit])
-        if len(unique) > limit:
+        queues[store] = deque(unique[:_MAX_CANDIDATES])
+        if len(unique) > _MAX_CANDIDATES:
             truncated = True
-    attempted = 0
-    while queues and attempted < limit:
+            warnings.append({'store': store, 'reason': 'candidate_limit'})
+    ordered = []
+    while queues:
         for store in tuple(queues):
-            if attempted >= limit:
-                break
             hits = queues[store]
             if not hits:
                 del queues[store]
                 continue
-            hit = hits.popleft()
-            attempted += 1
-            path = hit.get('read_path' if store == 'memory' else 'path') if isinstance(hit, dict) else None
-            if not _path_ok(path, _PREFIX[store]):
-                errors.append({'store': store, 'reason': 'invalid_result_path'})
-                continue
-            if path in seen:
-                continue
-            seen.add(path)
+            ordered.append((store, hits.popleft()))
+    candidate_keys = []
+    for store, hit in ordered:
+        path = hit.get('read_path' if store == 'memory' else 'path') if isinstance(hit, dict) else None
+        candidate_keys.append((store, path if isinstance(path, str) else None))
+    current_fingerprint = hashlib.sha256(json.dumps([query, terms, candidate_keys], ensure_ascii=True, separators=(',', ':')).encode('ascii')).hexdigest()
+    if offset and fingerprint != current_fingerprint:
+        return {'query': query, 'terms': terms, 'results': [],
+                'errors': [{'store': 'all', 'reason': 'result_set_changed'}], 'warnings': warnings,
+                'truncated': True, 'next_offset': None, 'fingerprint': current_fingerprint}
+    if index_limited:
+        warnings.append({'store': 'memory', 'reason': 'index_results_limited'})
+    next_offset = None
+    for position in range(offset, min(offset + limit, len(ordered))):
+        store, hit = ordered[position]
+        path = hit.get('read_path' if store == 'memory' else 'path') if isinstance(hit, dict) else None
+        if not _path_ok(path, _PREFIX[store]):
+            errors.append({'store': store, 'reason': 'invalid_result_path'})
+            continue
+        if path in seen:
+            continue
+        seen.add(path)
+        try:
             try:
-                try:
-                    source = call('read', {'relative': path})
-                except Exception:
-                    if store != 'missions':
-                        raise
-                    source = _snapshot_source(call, path, hit.get('revision'))
-                if (not isinstance(source, dict) or source.get('path') != path or
-                    not isinstance(source.get('text'), str) or not isinstance(source.get('revision'), str)):
-                    raise ValueError('invalid read response')
+                source = call('read', {'relative': path})
+            except SearchBudgetExceeded:
+                raise
             except Exception:
-                errors.append({'store': store, 'reason': 'source_unavailable', 'path': path})
-                continue
-            try:
-                actual_revision = hashlib.sha256(source['text'].encode('utf-8')).hexdigest()
-            except UnicodeError:
-                actual_revision = None
-            if (re.fullmatch(r'[0-9a-f]{64}', source['revision']) is None or
-                    actual_revision != source['revision']):
-                errors.append({'store': store, 'reason': 'source_integrity_mismatch', 'path': path})
-                continue
-            if hit.get('_catalog') is True and not any(term.casefold() in source['text'].casefold() for term in terms):
-                continue
-            meta = _metadata(source['text'], path)
-            old_revision = hit.get('revision')
-            if old_revision is not None and (not isinstance(old_revision, str) or re.fullmatch(r'[0-9a-f]{64}', old_revision) is None):
-                errors.append({'store': store, 'reason': 'invalid_search_revision', 'path': path})
-                drift = None
-            else:
-                drift = old_revision != source['revision'] if old_revision is not None else None
-            row = {'store': store, 'path': path, 'revision': source['revision'],
-                   'text': source['text'], 'read_method': source.get('read_method', 'full_read'), 'classification': _kind(meta),
-                   'snapshot_status': _snapshot_status(call, path, source, snapshot_cache) if store == 'missions' else None,
-                   'declared_status': meta.get('status'), 'evidence_status': meta.get('evidence_status'),
-                   'recorded_at': meta.get('recorded_at'), 'last_touched': meta.get('last_touched'),
-                   'decision_date': meta.get('decision_date'), 'verified_at': meta.get('verified_at'),
-                   'review_due': meta.get('review_due'), 'review_overdue': _overdue(meta.get('review_due')),
-                   'stale_after': meta.get('stale_after'), 'stale': _overdue(meta.get('stale_after')),
-                   'changed_since_search': drift}
-            results.append(row)
-            if not hits:
-                del queues[store]
-    if any(remaining for remaining in queues.values()):
+                if store != 'missions':
+                    raise
+                source = _snapshot_source(call, path, hit.get('revision'))
+            if (not isinstance(source, dict) or source.get('path') != path or
+                not isinstance(source.get('text'), str) or not isinstance(source.get('revision'), str)):
+                raise ValueError('invalid read response')
+        except SearchBudgetExceeded:
+            next_offset = position
+            truncated = True
+            break
+        except Exception:
+            errors.append({'store': store, 'reason': 'source_unavailable', 'path': path})
+            continue
+        try:
+            actual_revision = hashlib.sha256(source['text'].encode('utf-8')).hexdigest()
+        except UnicodeError:
+            actual_revision = None
+        if (re.fullmatch(r'[0-9a-f]{64}', source['revision']) is None or
+                actual_revision != source['revision']):
+            errors.append({'store': store, 'reason': 'source_integrity_mismatch', 'path': path})
+            continue
+        if hit.get('_catalog') is True and not any(term.casefold() in source['text'].casefold() for term in terms):
+            continue
+        meta = _metadata(source['text'], path)
+        old_revision = hit.get('revision')
+        if old_revision is not None and (not isinstance(old_revision, str) or re.fullmatch(r'[0-9a-f]{64}', old_revision) is None):
+            errors.append({'store': store, 'reason': 'invalid_search_revision', 'path': path})
+            drift = None
+        else:
+            drift = old_revision != source['revision'] if old_revision is not None else None
+        try:
+            snapshot_status = _snapshot_status(call, path, source, snapshot_cache) if store == 'missions' else None
+        except SearchBudgetExceeded:
+            next_offset = position
+            truncated = True
+            break
+        row = {'store': store, 'path': path, 'revision': source['revision'],
+               'candidate_offset': position,
+               'text': source['text'], 'read_method': source.get('read_method', 'full_read'), 'classification': _kind(meta),
+               'snapshot_status': snapshot_status,
+               'declared_status': meta.get('status'), 'evidence_status': meta.get('evidence_status'),
+               'recorded_at': meta.get('recorded_at'), 'last_touched': meta.get('last_touched'),
+               'decision_date': meta.get('decision_date'), 'verified_at': meta.get('verified_at'),
+               'review_due': meta.get('review_due'), 'review_overdue': _overdue(meta.get('review_due')),
+               'stale_after': meta.get('stale_after'), 'stale': _overdue(meta.get('stale_after')),
+               'changed_since_search': drift}
+        results.append(row)
+    if next_offset is None and offset + limit < len(ordered):
+        next_offset = offset + limit
+    if next_offset is not None or index_limited:
         truncated = True
     return {'query': query, 'terms': terms, 'results': results, 'errors': errors,
-            'warnings': warnings, 'truncated': truncated}
+            'warnings': warnings, 'truncated': truncated, 'next_offset': next_offset,
+            'fingerprint': current_fingerprint}

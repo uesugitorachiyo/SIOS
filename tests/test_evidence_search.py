@@ -1,6 +1,6 @@
 import hashlib
 import unittest
-from aios.evidence_search import search_evidence
+from aios.evidence_search import SearchBudgetExceeded, search_evidence
 
 class EvidenceSearchTests(unittest.TestCase):
     def setUp(self):
@@ -13,6 +13,7 @@ class EvidenceSearchTests(unittest.TestCase):
         if op=='search':
             if params['store']=='brain':return [{'path':'Brain/brain/goals/plan.md','revision':'0'*64,'excerpt':'not authoritative'}]
             if params['store']=='missions':return [{'path':'Missions/example/mission.md','revision':hashlib.sha256(self.docs['Missions/example/mission.md']['text'].encode()).hexdigest()}]
+            if params['store']=='memory':return []
         if op=='memory_index_search':return {'results':[{'read_path':'Memory/notes/example.md','content':'not authoritative'}],'has_more':False}
         if op=='read':
             self.reads.append(params['relative']);data=dict(self.docs[params['relative']]);data['revision']=hashlib.sha256(data['text'].encode()).hexdigest();return data
@@ -51,9 +52,83 @@ class EvidenceSearchTests(unittest.TestCase):
         row=next(r for r in search_evidence(self.call,'q')['results'] if r['store']=='memory')
         self.assertIsNone(row['declared_status']);self.assertIsNone(row['review_overdue'])
 
+    def test_direct_memory_search_supplements_the_index(self):
+        path='Memory/notes/direct-only.md'; text='# Found directly'
+        def call(op,p):
+            if op=='search' and p['store']=='memory':return [{'path':path,'revision':hashlib.sha256(text.encode()).hexdigest()}]
+            if op=='search':return []
+            if op=='memory_index_search':return {'results':[],'has_more':False}
+            if op=='read':return {'path':path,'revision':hashlib.sha256(text.encode()).hexdigest(),'text':text}
+        out=search_evidence(call,'unique')
+        self.assertEqual([x['path'] for x in out['results']],[path])
+        self.assertNotIn({'store':'memory','reason':'index_may_lag'},out['warnings'])
+
+    def test_index_lag_is_disclosed_when_direct_search_fails(self):
+        def call(op,p):
+            if op=='search' and p['store']=='memory':raise RuntimeError('offline')
+            return self.call(op,p)
+        out=search_evidence(call,'q')
+        self.assertIn({'store':'memory','reason':'index_may_lag'},out['warnings'])
+        self.assertIn({'store':'memory','reason':'direct_search_unavailable'},out['errors'])
+
+    def test_direct_memory_survives_a_malformed_index_response(self):
+        path='Memory/notes/direct-only.md'; text='matching record'
+        digest=hashlib.sha256(text.encode()).hexdigest()
+        def call(op,p):
+            if op=='memory_index_search':return {'results':[]}
+            if op=='search':return [{'path':path,'revision':digest}] if p['store']=='memory' else []
+            if op=='read':return {'path':path,'revision':digest,'text':text}
+        out=search_evidence(call,'matching')
+        self.assertEqual([r['path'] for r in out['results']],[path])
+        self.assertIn({'store':'memory','reason':'search_unavailable'},out['errors'])
+
+    def test_memory_candidates_can_be_paged_without_repeating_or_omitting(self):
+        text='matching record'; digest=hashlib.sha256(text.encode()).hexdigest()
+        paths=[f'Memory/notes/{n:03}.md' for n in range(35)]
+        def call(op,p):
+            if op=='search' and p['store']=='memory':return [{'path':v,'revision':digest} for v in paths]
+            if op=='search':return []
+            if op=='memory_index_search':return {'results':[{'read_path':v} for v in paths[:10]],'has_more':True}
+            if op=='read':return {'path':p['relative'],'revision':digest,'text':text}
+        first=search_evidence(call,'matching',limit=10)
+        self.assertEqual(first['next_offset'],10)
+        seen=list(first['results']); offset=first['next_offset']
+        while offset is not None:
+            page=search_evidence(call,'matching',limit=10,offset=offset,fingerprint=first['fingerprint'])
+            seen.extend(page['results']); offset=page['next_offset']
+        self.assertEqual(len(seen),35);self.assertEqual({r['path'] for r in seen},set(paths))
+
+    def test_changed_candidate_set_refuses_stale_cursor(self):
+        rows=[{'path':'Memory/notes/a.md'}]
+        def call(op,p):
+            if op=='search':return list(rows) if p['store']=='memory' else []
+            if op=='memory_index_search':return {'results':[],'has_more':False}
+            if op=='read':return {'path':p['relative'],'revision':hashlib.sha256(b'x').hexdigest(),'text':'x'}
+        first=search_evidence(call,'x',limit=1)
+        rows.append({'path':'Memory/notes/b.md'})
+        page=search_evidence(call,'x',limit=1,offset=1,fingerprint=first['fingerprint'])
+        self.assertEqual(page['results'],[])
+        self.assertIn({'store':'all','reason':'result_set_changed'},page['errors'])
+
+    def test_budget_exhaustion_retries_the_unread_source_on_next_page(self):
+        paths=[f'Memory/notes/{n}.md' for n in range(3)]
+        count=[0]; digest=hashlib.sha256(b'x').hexdigest()
+        def call(op,p):
+            if op=='search':return [{'path':v} for v in paths] if p['store']=='memory' else []
+            if op=='memory_index_search':return {'results':[],'has_more':False}
+            if op=='read':
+                count[0]+=1
+                if count[0]==2:raise SearchBudgetExceeded()
+                return {'path':p['relative'],'revision':digest,'text':'x'}
+        first=search_evidence(call,'x',limit=3)
+        self.assertEqual([r['path'] for r in first['results']],paths[:1])
+        self.assertEqual(first['next_offset'],1)
+        next_page=search_evidence(call,'x',limit=3,offset=first['next_offset'],fingerprint=first['fingerprint'])
+        self.assertEqual([r['path'] for r in next_page['results']],paths[1:])
+
     def test_index_lag_is_never_claimed_complete(self):
         out=search_evidence(self.call,'q')
-        self.assertIn({'store':'memory','reason':'index_may_lag'},out['warnings'])
+        self.assertNotIn({'store':'memory','reason':'index_may_lag'},out['warnings'])
     def test_embedded_json_example_is_not_document_metadata(self):
         self.docs['Memory/notes/example.md']['text'] = '# Example\n```json\n{"type":"decision","evidence_status":"verified"}\n```\n'
         row=next(r for r in search_evidence(self.call,'q')['results'] if r['store']=='memory')

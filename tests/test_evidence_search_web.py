@@ -59,7 +59,7 @@ class EvidenceWebTests(unittest.TestCase):
         self.assertEqual(status, 200)
         result = json.loads(body)
         self.assertEqual(result['results'][0]['text'], '# Source\n<script>unsafe()</script>')
-        self.assertIn({'store':'memory','reason':'index_may_lag'}, result['warnings'])
+        self.assertNotIn({'store':'memory','reason':'index_may_lag'}, result['warnings'])
         self.assertIn('no-store', headers['Cache-Control'])
         self.assertIn('textContent', self.html)
         self.assertNotIn('innerHTML', self.html)
@@ -93,7 +93,7 @@ class EvidenceWebTests(unittest.TestCase):
             status, _, body = self.request('POST','/search',json.dumps({'query':'x'}),self.headers())
             self.assertEqual(status,200)
             self.assertNotIn(b'private secret or path',body)
-            self.assertEqual(len(json.loads(body)['errors']),3)
+            self.assertEqual({e['store'] for e in json.loads(body)['errors']},{'brain','memory','missions'})
             self.server, self.port, self.csrf = old
         finally:
             other.shutdown();other.server_close();t.join()
@@ -164,6 +164,49 @@ class EvidenceWebTests(unittest.TestCase):
         result=json.loads(body);self.assertEqual(status,200);self.assertLessEqual(len(body),350)
         self.assertTrue(result['truncated'])
         self.assertIn({'store':'all','reason':'response_limit'},result['warnings'])
+
+    def test_pages_cover_direct_memory_matches_beyond_the_index_page(self):
+        paths=[f'Memory/notes/{n:03}.md' for n in range(42)]
+        text='fixture keyword'; revision=hashlib.sha256(text.encode()).hexdigest()
+        def call(op,args):
+            if op=='memory_index_search':return {'results':[{'read_path':p} for p in paths[:10]],'has_more':True}
+            if op=='search':return [{'path':p,'revision':revision} for p in paths] if args['store']=='memory' else []
+            if op=='read':return {'path':args['relative'],'revision':revision,'text':text}
+            raise AssertionError(op)
+        other=create_server(call);thread=threading.Thread(target=other.serve_forever,daemon=True);thread.start()
+        old=self.server,self.port,self.csrf
+        try:
+            self.server,self.port,self.csrf=other,other.server_address[1],other.access_url.split('#',1)[1]
+            code,_,body=self.request('POST','/search',json.dumps({'query':'fixture'}),self.headers())
+            first=json.loads(body);self.assertEqual(code,200);self.assertEqual(len(first['results']),30)
+            self.assertEqual(first['next_offset'],30)
+            request={'query':'fixture','offset':first['next_offset'],'fingerprint':first['fingerprint']}
+            code,_,body=self.request('POST','/search',json.dumps(request),self.headers())
+            second=json.loads(body);self.assertEqual(code,200);self.assertIsNone(second['next_offset'])
+            self.assertEqual({r['path'] for r in first['results']+second['results']},set(paths))
+            self.assertNotIn({'store':'memory','reason':'index_may_lag'},first['warnings'])
+            self.assertIn({'store':'memory','reason':'index_results_limited'},first['warnings'])
+        finally:
+            self.server,self.port,self.csrf=old;other.shutdown();other.server_close();thread.join()
+
+    def test_source_budget_next_page_retries_the_blocked_record(self):
+        text='x'*1000; digest=hashlib.sha256(text.encode()).hexdigest()
+        paths=[f'Memory/notes/{n}.md' for n in range(3)]
+        def call(op,args):
+            if op=='memory_index_search':return {'results':[],'has_more':False}
+            if op=='search':return [{'path':p} for p in paths] if args['store']=='memory' else []
+            if op=='read':return {'path':args['relative'],'revision':digest,'text':text}
+        other=create_server(call);thread=threading.Thread(target=other.serve_forever,daemon=True);thread.start()
+        old=self.server,self.port,self.csrf
+        try:
+            self.server,self.port,self.csrf=other,other.server_address[1],other.access_url.split('#',1)[1]
+            with patch('aios.evidence_search_web.MAX_SOURCE_BYTES', 1500):
+                _,_,body=self.request('POST','/search',json.dumps({'query':'x'}),self.headers())
+                first=json.loads(body);self.assertEqual(first['next_offset'],1)
+                _,_,body=self.request('POST','/search',json.dumps({'query':'x','offset':1,'fingerprint':first['fingerprint']}),self.headers())
+                second=json.loads(body);self.assertEqual(second['results'][0]['path'],paths[1])
+        finally:
+            self.server,self.port,self.csrf=old;other.shutdown();other.server_close();thread.join()
 
     def test_time_limit_marks_partial_results(self):
         def call(op,args):

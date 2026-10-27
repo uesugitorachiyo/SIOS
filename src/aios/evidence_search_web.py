@@ -16,7 +16,7 @@ from pathlib import Path
 
 from .client import Client
 from .config import Config
-from .evidence_search import search_evidence
+from .evidence_search import SearchBudgetExceeded, search_evidence
 
 MAX_REQUEST = 8192
 MAX_SOURCE_BYTES = 10_000_000
@@ -160,7 +160,7 @@ def create_server(call, *, port=0):
                 return
             try:
                 data = json.loads(self.rfile.read(int(lengths[0])).decode('utf-8'))
-                if not isinstance(data, dict) or set(data) != {'query'}:
+                if not isinstance(data, dict) or set(data) not in ({'query'}, {'query', 'offset', 'fingerprint'}):
                     raise ValueError('invalid request')
                 if not search_lock.acquire(blocking=False):
                     self._send(429, b'Search already in progress', 'text/plain; charset=utf-8')
@@ -173,22 +173,27 @@ def create_server(call, *, port=0):
                     nonlocal used, limited, timed_out
                     if time.monotonic() >= deadline:
                         timed_out = True
-                        raise RuntimeError('search time limit')
+                        raise SearchBudgetExceeded('search time limit')
                     if operation == 'read' and (limited or used >= MAX_SOURCE_BYTES):
                         limited = True
-                        raise RuntimeError('source limit')
+                        raise SearchBudgetExceeded('source limit')
                     result = call(operation, params)
                     if operation == 'read' and isinstance(result, dict) and isinstance(result.get('text'), str):
                         size = len(result['text'].encode('utf-8'))
                         if used + size > MAX_SOURCE_BYTES:
                             limited = True
-                            raise RuntimeError('source limit')
+                            raise SearchBudgetExceeded('source limit')
                         used += size
                     return result
                 try:
                     token = _SEARCH_DEADLINE.set(deadline)
                     try:
-                        result = search_evidence(bounded_call, data['query'], limit=30)
+                        try:
+                            result = search_evidence(bounded_call, data['query'], limit=30,
+                                                     offset=data.get('offset', 0), fingerprint=data.get('fingerprint'))
+                        except SearchBudgetExceeded:
+                            result = {'query': data['query'], 'terms': [], 'results': [], 'errors': [],
+                                      'warnings': [], 'truncated': True, 'next_offset': None, 'fingerprint': None}
                     finally:
                         _SEARCH_DEADLINE.reset(token)
                 finally:
@@ -205,7 +210,9 @@ def create_server(call, *, port=0):
                     if {'store': 'all', 'reason': 'response_limit'} not in result['warnings']:
                         result['warnings'].append({'store': 'all', 'reason': 'response_limit'})
                     while len(body) > MAX_RESPONSE_BYTES and result['results']:
-                        result['results'].pop()
+                        dropped = result['results'].pop()
+                        previous = result.get('next_offset')
+                        result['next_offset'] = min(previous, dropped['candidate_offset']) if previous is not None else dropped['candidate_offset']
                         body = json.dumps(result, ensure_ascii=False, allow_nan=False).encode('utf-8')
                     if len(body) > MAX_RESPONSE_BYTES:
                         raise ValueError('response limit')
