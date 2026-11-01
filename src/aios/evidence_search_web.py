@@ -11,6 +11,7 @@ import sys
 import threading
 import time
 import tomllib
+import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -74,7 +75,18 @@ def registered_launcher(name, config_path=None):
     return entry['command'], args, env, cwd
 
 
-async def serve_mcp(command, arguments, port, env=None, cwd=None):
+def announce_server(server, open_browser=False):
+    """Offer the private, loopback-only session link without logging it elsewhere."""
+    print('Evidence Search: ' + server.access_url, flush=True)
+    if open_browser:
+        try:
+            if not webbrowser.open(server.access_url):
+                print('Could not open a browser. Use the session link above.', file=sys.stderr)
+        except Exception:
+            print('Could not open a browser. Use the session link above.', file=sys.stderr)
+
+
+async def serve_mcp(command, arguments, port, env=None, cwd=None, open_browser=False):
     """Use an existing configured MCP launcher; the launcher handles credentials."""
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
@@ -96,7 +108,7 @@ async def serve_mcp(command, arguments, port, env=None, cwd=None):
                 server = create_server(call, port=port)
                 thread = threading.Thread(target=server.serve_forever, daemon=True)
                 thread.start()
-                print('Evidence Search: ' + server.access_url, flush=True)
+                announce_server(server, open_browser)
                 try:
                     await asyncio.Event().wait()
                 finally:
@@ -239,6 +251,7 @@ def main(argv=None):
     parser.add_argument('--mcp-arg', action='append', default=[], help='Argument for the existing MCP launcher; repeat as needed')
     parser.add_argument('--ca-file', type=Path, help='Existing trusted CA for the SIOS server')
     parser.add_argument('--port', type=int, default=0, help='Local loopback port; 0 chooses an available port')
+    parser.add_argument('--open', action='store_true', help='Open the private session in the default browser')
     args = parser.parse_args(argv)
     if args.mcp_command or args.registered:
         try:
@@ -248,7 +261,7 @@ def main(argv=None):
                 command, arguments, env, cwd = registered_launcher(args.registered)
             else:
                 command, arguments, env, cwd = args.mcp_command, args.mcp_arg, None, None
-            asyncio.run(serve_mcp(command, arguments, args.port, env=env, cwd=cwd))
+            asyncio.run(serve_mcp(command, arguments, args.port, env=env, cwd=cwd, open_browser=args.open))
         except KeyboardInterrupt:
             pass
         except Exception as exc:
@@ -264,7 +277,7 @@ def main(argv=None):
     except (OSError, ValueError) as exc:
         print('Unable to start evidence search: ' + type(exc).__name__, file=sys.stderr)
         return 2
-    print('Evidence Search: ' + server.access_url, flush=True)
+    announce_server(server, args.open)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

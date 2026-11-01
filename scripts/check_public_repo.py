@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ROOT_FILES = {
     ".gitattributes", ".gitignore", "LICENSE", "README.md", "THIRD_PARTY_NOTICES.md",
     "pyproject.toml", "requirements.basic-memory.lock",
+    "Start Evidence Search.cmd", "Start Evidence Search.command",
 }
 SOURCE_PREFIXES = ("src/aios/", "docs/", "templates/", "tests/", "scripts/")
 ALLOWED_SUFFIXES = {".py", ".md", ".json", ".ps1", ".toml", ".lock", ".txt"}
@@ -50,7 +51,7 @@ def main() -> int:
             issues.append(f"{name}: private or generated path")
             continue
         if (relative.suffix not in ALLOWED_SUFFIXES and name not in ROOT_FILES
-                and name != "src/aios/evidence_search_ui.html"):
+                and name not in {"src/aios/evidence_search_ui.html", "tests/test_evidence_search_render.cjs"}):
             issues.append(f"{name}: unexpected file type")
             continue
         if path.is_symlink() or not path.is_file():

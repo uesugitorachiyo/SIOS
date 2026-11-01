@@ -10,7 +10,24 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from aios.evidence_search_web import create_server, mcp_value, registered_launcher
+from aios.evidence_search_web import announce_server, create_server, mcp_value, registered_launcher
+
+
+class BrowserLaunchTests(unittest.TestCase):
+    def test_browser_opens_only_when_requested(self):
+        server = SimpleNamespace(access_url='http://127.0.0.1:12345/#fixture')
+        with patch('aios.evidence_search_web.webbrowser.open', return_value=True) as open_browser, patch('builtins.print'):
+            announce_server(server)
+            open_browser.assert_not_called()
+            announce_server(server, True)
+            open_browser.assert_called_once_with(server.access_url)
+
+    def test_browser_failure_keeps_manual_link_available(self):
+        server = SimpleNamespace(access_url='http://127.0.0.1:12345/#fixture')
+        with patch('aios.evidence_search_web.webbrowser.open', side_effect=OSError), patch('builtins.print') as output:
+            announce_server(server, True)
+        self.assertIn(server.access_url, output.call_args_list[0].args[0])
+        self.assertIn('Could not open a browser', output.call_args_list[1].args[0])
 
 
 class EvidenceWebTests(unittest.TestCase):

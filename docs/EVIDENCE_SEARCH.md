@@ -44,6 +44,15 @@ and stops when the terminal process ends. It restricts browser-origin requests
 and requires the session capability; this is not a boundary against a hostile
 process running as the same operating-system user.
 
+After setup, open `Start Evidence Search.command` on macOS or
+`Start Evidence Search.cmd` on Windows from this checkout. These launch the
+checkout's source with its `.venv` and open the default browser; leave the
+terminal open while searching. They use the existing `sios-l0` or `sios-nucx`
+registration respectively. If the browser does not open, use the private link
+printed in that terminal. You can also add `--open` to either command above.
+Do not share the link. Stop the program by closing the terminal or pressing
+Ctrl+C. Installing or copying a checkout does not register a SIOS client.
+
 ## Reading the results
 
 Search is literal keyword matching. For a longer mixed-language question, a
@@ -56,6 +65,14 @@ verification or review dates come from the full document. Unknown fields stay
 unknown. A matching revision proves only byte consistency with the read
 response, not that the statement is true or current. A past review or stale
 date is flagged using the local computer's date.
+
+Result titles and excerpts are taken from the read source; they are navigation
+aids, not assertions about authority. The source filter narrows only results
+already loaded, not the server search. Use **Load more results** when shown.
+In the original viewer, **Find in original** searches within displayed-size
+parts and cycles through matching parts, highlighting the first match in each.
+A phrase split across two parts will not match; use a shorter term. To find
+additional matches within a single part, use the browser's Find command.
 
 A Memory index may lag, so direct exact-text source search can find matching
 records that have not yet been indexed. The index can also return matches that
