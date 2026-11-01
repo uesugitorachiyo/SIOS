@@ -29,6 +29,7 @@ state/
 test-output/
 rollback/
 provenance/
+projects/
 transfer-*/
 *.enc
 *.bundle
