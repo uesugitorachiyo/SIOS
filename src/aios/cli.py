@@ -288,20 +288,24 @@ def main(argv=None):
                     raise ValueError('Thread pilot requires explicit device identities')
                 from .agent_threads import load_project_acl
                 thread_projects = load_project_acl(args.thread_acl, principals)
-            server = make_server(Store(cfg.data_root, cfg.timezone, completion_validation=args.completion_validation,
+            store = Store(cfg.data_root, cfg.timezone, completion_validation=args.completion_validation,
                                        completion_missions=args.completion_mission,
                                        thread_projects=thread_projects,
-                                       thread_principals=principals if thread_projects is not None else None), cfg.instance_id, devices,
+                                       thread_principals=principals if thread_projects is not None else None)
+            server = make_server(store, cfg.instance_id, devices,
                                  bind=args.bind, port=args.port, cert=args.cert, key=args.key)
             scheme = "https" if args.cert else "http"
             address = server.server_address
             host = f"[{address[0]}]" if ":" in address[0] else address[0]
             print(json.dumps({"endpoint": f"{scheme}://{host}:{address[1]}", "instance_id": cfg.instance_id}), flush=True)
+            from .index_retry import RetryWorker
+            retry_worker = RetryWorker(store).start()
             try:
                 server.serve_forever()
             except KeyboardInterrupt:
                 pass
             finally:
+                retry_worker.stop()
                 server.server_close()
             return 0
         if args.command == "mcp":

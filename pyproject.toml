@@ -26,12 +26,14 @@ Repository = "https://github.com/uesugitorachiyo/SIOS"
 [project.scripts]
 sios = "aios.cli:main"
 sios-memory = "aios.memory_mcp:main"
+sios-evidence-search = "aios.evidence_search_web:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+exclude = ["aios.factory", "aios.factory.*"]
 
 [tool.setuptools]
 include-package-data = false
 
 [tool.setuptools.package-data]
-aios = ["verification_data/security-report.schema.json"]
+aios = ["verification_data/security-report.schema.json", "evidence_search_ui.html"]

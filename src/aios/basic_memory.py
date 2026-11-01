@@ -10,10 +10,14 @@ import json
 import math
 import os
 import asyncio
+from contextlib import closing
 from pathlib import Path
 import re
+import sqlite3
 import stat
 import subprocess
+
+from .pathutils import file_snapshot_identity, native_path, stable_file_identity
 
 _VERSION = "Basic Memory version: 0.23.2"
 _MARKER = ".aios-basic-memory-index.json"
@@ -57,6 +61,7 @@ def _check_node(path: Path) -> None:
 
 
 def _check_tree(root: Path) -> None:
+    root = native_path(root)
     _check_node(root)
     if root.exists():
         for directory, dirs, files in os.walk(root, followlinks=False):
@@ -283,13 +288,11 @@ class BasicMemoryIndex:
             try:
                 with os.fdopen(descriptor, "rb", closefd=False) as stream:
                     held = os.fstat(stream.fileno())
-                    def identity(info):
-                        return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
-                    if not stat.S_ISREG(held.st_mode) or identity(named) != identity(held):
+                    if not stat.S_ISREG(held.st_mode) or stable_file_identity(named) != stable_file_identity(held):
                         raise ValueError()
                     raw = stream.read(1048577)
-                    if (len(raw) > 1048576 or identity(held) != identity(os.fstat(stream.fileno()))
-                            or identity(held) != identity(config.lstat())):
+                    if (len(raw) > 1048576 or file_snapshot_identity(held) != file_snapshot_identity(os.fstat(stream.fileno()))
+                            or file_snapshot_identity(named) != file_snapshot_identity(config.lstat())):
                         raise ValueError()
                     if durable:
                         os.fsync(stream.fileno())
@@ -419,6 +422,68 @@ class BasicMemoryIndex:
             raise
         except Exception:
             raise BasicMemoryError("scoped Basic Memory refresh unavailable") from None
+
+    def _indexed_checksums_match(self, expected: dict[str, str | None]) -> bool:
+        """Read the pinned local index without opening a write connection."""
+        database = self.config_dir / 'memory.db'
+        _check_node(database)
+        if not database.is_file():
+            return False
+        try:
+            with closing(sqlite3.connect(database.as_uri() + '?mode=ro', uri=True, timeout=0.25)) as db:
+                db.execute('PRAGMA query_only=ON')
+                projects = db.execute('SELECT id, name, path FROM project').fetchall()
+                if (len(projects) != 1 or projects[0][1] != self.project or
+                        Path(projects[0][2]).resolve() != self.memory_root.resolve()):
+                    raise BasicMemoryError('index project does not match binding')
+                project_id = projects[0][0]
+                for path, checksum in expected.items():
+                    rows = db.execute('SELECT checksum FROM entity WHERE project_id=? AND file_path=?',
+                                      (project_id, path)).fetchall()
+                    if rows != ([] if checksum is None else [(checksum,)]):
+                        return False
+            return True
+        except sqlite3.OperationalError:
+            return False
+        except (sqlite3.Error, OSError, TypeError, ValueError):
+            raise BasicMemoryError('index checksum observation unavailable') from None
+
+    async def wait_for_files(self, expected: dict[str, str | None], timeout: float = 7) -> bool:
+        """Briefly run the existing scoped MCP sync and check exact indexed hashes."""
+        if (not isinstance(expected, dict) or not expected or len(expected) > 2 or
+                not 0 < timeout <= 7):
+            raise BasicMemoryError('invalid index observation request')
+        for path, checksum in expected.items():
+            if (not isinstance(path, str) or not path or '\\' in path or path.startswith('/') or
+                    any(part in ('', '.', '..') for part in path.split('/')) or
+                    not path.lower().endswith('.md') or
+                    (checksum is not None and (not isinstance(checksum, str) or
+                     re.fullmatch(r'[0-9a-f]{64}', checksum) is None))):
+                raise BasicMemoryError('invalid index observation target')
+        self._ensure_index_root()
+        self._validate_configuration()
+        try:
+            from mcp import ClientSession, StdioServerParameters
+            from mcp.client.stdio import stdio_client
+            parameters = StdioServerParameters(
+                command=self.executable,
+                args=['mcp', '--transport', 'stdio', '--project', self.project],
+                env=self._environment(), cwd=self.config_dir.parent,
+            )
+            async with asyncio.timeout(timeout):
+                with open(os.devnull, 'w', encoding='utf-8') as errors:
+                    async with stdio_client(parameters, errlog=errors) as (reader, writer):
+                        async with ClientSession(reader, writer) as session:
+                            await session.initialize()
+                            while not self._indexed_checksums_match(expected):
+                                await asyncio.sleep(0.25)
+                            return True
+        except TimeoutError:
+            return False
+        except BasicMemoryError:
+            raise
+        except Exception:
+            raise BasicMemoryError('scoped Basic Memory refresh unavailable') from None
 
 
 def _readiness_observation(search: object) -> bool:

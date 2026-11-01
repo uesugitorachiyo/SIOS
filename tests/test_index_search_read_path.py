@@ -15,7 +15,7 @@ class IndexSearchReadPathTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix='sios-index-read-path-')
         self.addCleanup(self.temp.cleanup)
         self.store = Store(Path(self.temp.name).resolve() / 'data')
-        self.note = self.store.root / 'Memory' / 'sessions' / '計画 progress — 2026-10-20.md'
+        self.note = self.store.root / 'Memory' / 'sessions' / 'caf\u00e9 progress \u2014 2026-10-20.md'
         self.note.parent.mkdir(parents=True)
         self.note.write_text('# Fixture progress\n')
 
