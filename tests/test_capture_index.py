@@ -44,7 +44,8 @@ class CaptureIndexTests(unittest.TestCase):
         with patch('aios.index_binding.load_index', return_value=index) as refresh:
             first = self.capture({'read', 'memory:write'})
             self.assertEqual(first['status'], 'captured')
-            self.assertEqual(first['index_refresh'], {'ready': True, 'reason': None})
+            self.assertEqual(first['index_refresh'], {'ready': False,
+                'reason': 'search_visibility_unverified', 'index_projection_ready': True})
             self.assertEqual(index.expected, {first['path'].removeprefix('Memory/'): first['revision']})
             self.assertEqual(self.store.read(first['path'])['revision'], first['revision'])
             second = self.capture({'read', 'memory:write'})
@@ -111,9 +112,11 @@ class CaptureIndexTests(unittest.TestCase):
             report = dispatch(self.store, 'publish', {'routine': 'test', 'run_id': 'sample-run',
                 'report': '# Synthetic report', 'summary': 'Synthetic', 'status': 'completed',
                 'request_id': 'report-1'}, actor='fixture', scopes=scopes)
-        self.assertTrue(note['index_refresh']['ready'])
+        self.assertEqual(note['index_refresh'], {'ready': False,
+            'reason': 'search_visibility_unverified', 'index_projection_ready': True})
         self.assertEqual(index.calls[0], {'notes/sample.md': note['result']['revision']})
-        self.assertTrue(report['index_refresh']['ready'])
+        self.assertEqual(report['index_refresh'], {'ready': False,
+            'reason': 'search_visibility_unverified', 'index_projection_ready': True})
         expected_paths = {report['result']['report'].removeprefix('Memory/'),
                           report['result']['journal'].removeprefix('Memory/')}
         self.assertEqual(set(index.calls[1]), expected_paths)

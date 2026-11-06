@@ -299,14 +299,16 @@ def main(argv=None):
             host = f"[{address[0]}]" if ":" in address[0] else address[0]
             print(json.dumps({"endpoint": f"{scheme}://{host}:{address[1]}", "instance_id": cfg.instance_id}), flush=True)
             from .index_retry import RetryWorker
-            retry_worker = RetryWorker(store).start()
-            try:
-                server.serve_forever()
-            except KeyboardInterrupt:
-                pass
-            finally:
-                retry_worker.stop()
-                server.server_close()
+            repair_callback = None
+            if os.environ.get('SIOS_REPAIR_100_ENABLED') == '1':
+                if sys.platform != 'darwin':
+                    raise ValueError('Basic Memory repair is supported only on macOS')
+                from .index_repair_100 import from_environment
+                repair_callback = from_environment(os.environ)
+            retry_worker = RetryWorker(store, repair=repair_callback,
+                                       resume_uncertain=repair_callback is not None).start()
+            from .graceful_drain import serve_draining
+            serve_draining(server, retry_worker)
             return 0
         if args.command == "mcp":
             from .mcp_adapter import run

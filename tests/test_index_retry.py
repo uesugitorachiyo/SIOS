@@ -77,7 +77,8 @@ class IndexRetryTests(unittest.TestCase):
                 return True
         with patch('aios.index_binding.load_index', return_value=Index()):
             first = self.write(create=True)
-        self.assertTrue(first['index_refresh']['ready'])
+        self.assertFalse(first['index_refresh']['ready'])
+        self.assertTrue(first['index_refresh']['index_projection_ready'])
         self.assertEqual(pending_count(self.store), 0)
         with patch('aios.index_binding.load_index', side_effect=RuntimeError('offline')):
             repeat = self.write(create=True)
