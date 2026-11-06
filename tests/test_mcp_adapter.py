@@ -33,6 +33,7 @@ class MCPAdapterTests(unittest.TestCase):
             names = {tool.name for tool in asyncio.run(server.list_tools())}
             self.assertTrue({"identity", "read", "catalog", "memory_write", "memory_index_refresh",
                              "memory_index_search", "memory_search_verified", "memory_capture", "memory_capture_readiness",
+                             "memory_capture_body_readiness", "memory_literal_verified", "read_successor_evidence",
                              "thread_create", "thread_post", "thread_list", "thread_read",
                              "thread_fetch", "thread_ack", "thread_close", "thread_revoke"} <= names)
             self.assertNotIn("brain_apply", names)
@@ -61,6 +62,81 @@ class MCPAdapterTests(unittest.TestCase):
             self.assertTrue(json.loads(result.content[0].text)['ready'])
             self.assertEqual([item.args[0] for item in client.return_value.call.call_args_list],
                              ['health', 'memory_index_status', 'memory_index_search', 'read', 'memory_index_status'])
+
+    def test_body_literal_and_successor_tools_use_scoped_connection(self):
+        from mcp.server.mcpserver import MCPServer
+        stem = 'selective-' + 'a' * 64
+        path = 'Memory/notes/' + stem + '.md'
+        body = '<!-- aios-selective-memory-v1 -->\n```json\n{"supersedes": null}\n```\nfictionalbodytoken'
+        revision = hashlib.sha256(body.encode()).hexdigest()
+        hit = {'title': stem, 'type': 'entity', 'file_path': 'notes/' + stem + '.md', 'read_path': path}
+        page = {'results': [hit], 'total': 1, 'has_more': False, 'current_page': 1, 'page_size': 10, 'total_is_exact': True}
+        source = {'path': path, 'revision': revision, 'text': body}
+        def call(op, args):
+            if op == 'health': return {'ok': True, 'database': 'ok', 'pending_operations': 0}
+            if op == 'memory_index_search': return page
+            if op == 'search': return [{'path': path, 'revision': revision}]
+            if op == 'read': return source
+            raise AssertionError('unexpected operation')
+        with tempfile.TemporaryDirectory(prefix='sios-mcp-') as raw:
+            root = Path(raw)
+            cfg = Config('client', '00000000-0000-4000-8000-000000000001', root/'data', root/'cache',
+                         'UTC', 'https://127.0.0.1:9443', root/'client.json')
+            with patch('aios.mcp_adapter.Client') as client, patch.object(MCPServer, 'run', autospec=True) as start:
+                client.return_value.call.side_effect = call
+                run(cfg)
+                server = start.call_args.args[0]
+                async def check():
+                    body_result = await server.call_tool('memory_capture_body_readiness', {'path': path, 'revision': revision, 'marker': 'fictionalbodytoken'})
+                    literal_result = await server.call_tool('memory_literal_verified', {'query': 'fictionalbodytoken'})
+                    successor_result = await server.call_tool('read_successor_evidence', {'predecessor_path': path})
+                    return body_result, literal_result, successor_result
+                body_result, literal_result, successor_result = asyncio.run(check())
+            self.assertTrue(json.loads(body_result.content[0].text)['ready'])
+            self.assertEqual(len(json.loads(literal_result.content[0].text)['verified']), 1)
+            self.assertEqual(json.loads(successor_result.content[0].text)['current_state'], 'unknown')
+            self.assertTrue(set(x.args[0] for x in client.return_value.call.call_args_list) <=
+                            {'health', 'memory_index_search', 'search', 'read'})
+
+    def test_new_helpers_do_not_bypass_denied_read_scope(self):
+        from aios.client import RemoteError
+        from mcp.server.mcpserver import MCPServer
+        stem = 'selective-' + 'a' * 64
+        path = 'Memory/notes/' + stem + '.md'
+        with tempfile.TemporaryDirectory(prefix='sios-mcp-') as raw:
+            root = Path(raw)
+            cfg = Config('client', '00000000-0000-4000-8000-000000000001', root/'data', root/'cache',
+                         'UTC', 'https://127.0.0.1:9443', root/'client.json')
+            def call(op, params):
+                if op == 'health': return {'ok': True, 'database': 'ok', 'pending_operations': 0}
+                raise RemoteError('forbidden', 403)
+            with patch('aios.mcp_adapter.Client') as client, patch.object(MCPServer, 'run', autospec=True) as start:
+                client.return_value.call.side_effect = call
+                run(cfg)
+                server = start.call_args.args[0]
+                async def check():
+                    body = await server.call_tool('memory_capture_body_readiness', {'path': path, 'revision': 'b'*64, 'marker': 'fictional'})
+                    successor = await server.call_tool('read_successor_evidence', {'predecessor_path': path})
+                    return body, successor
+                body, successor = asyncio.run(check())
+            self.assertFalse(json.loads(body.content[0].text)['ready'])
+            self.assertEqual(json.loads(successor.content[0].text)['status'], 'unknown')
+            self.assertTrue(set(x.args[0] for x in client.return_value.call.call_args_list) <=
+                            {'health', 'memory_index_search', 'read'})
+
+    def test_literal_scan_refuses_pending_operations(self):
+        from mcp.server.mcpserver import MCPServer
+        with tempfile.TemporaryDirectory(prefix='sios-mcp-') as raw:
+            root = Path(raw)
+            cfg = Config('client', '00000000-0000-4000-8000-000000000001', root/'data', root/'cache',
+                         'UTC', 'https://127.0.0.1:9443', root/'client.json')
+            with patch('aios.mcp_adapter.Client') as client, patch.object(MCPServer, 'run', autospec=True) as start:
+                client.return_value.call.return_value = {'ok': True, 'pending_operations': 1}
+                run(cfg)
+                from mcp.server.mcpserver.exceptions import ToolError
+                with self.assertRaises(ToolError):
+                    asyncio.run(start.call_args.args[0].call_tool('memory_literal_verified', {'query': 'fiction'}))
+            self.assertEqual([x.args[0] for x in client.return_value.call.call_args_list], ['health'])
 
     def test_verified_search_uses_registered_connection(self):
         from mcp.server.mcpserver import MCPServer

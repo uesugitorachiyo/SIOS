@@ -74,6 +74,10 @@ def run(cfg: Config, ca_file: Path | None = None) -> None:
 
     from .client_ready_proof import CaptureReadiness
     ready_proof = CaptureReadiness(call, timeout=15)
+    from .bounded_body_proof import BodyProof
+    body_proof = BodyProof(call, timeout=15)
+    from .successor_mcp_bridge import SuccessorBridge
+    successor_bridge = SuccessorBridge(call)
 
     @mcp.tool(description="Read one allowed Markdown document or run metadata by relative path.", annotations=read_hint)
     def read(relative: str) -> Any:
@@ -134,6 +138,24 @@ def run(cfg: Config, ca_file: Path | None = None) -> None:
     @mcp.tool(description="Observe exact-stem search visibility and source checksum of an already committed selective note. Reads may invoke recovery or synchronization. This does not prove complete index coverage or an atomic snapshot.", annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=open_world))
     async def memory_capture_readiness(path: str, revision: str) -> Any:
         return await asyncio.to_thread(ready_proof.observe, path, revision)
+
+    @mcp.tool(description="Check one body marker query against an exact committed selective note and its full source. Does not prove completeness; marker is sent to search, so do not supply secrets. Underlying calls may synchronize or recover state.", annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=open_world))
+    async def memory_capture_body_readiness(path: str, revision: str, marker: str) -> Any:
+        return await asyncio.to_thread(body_proof.check, path, revision, marker)
+
+    @mcp.tool(description="Inspect declared successor evidence using existing read scope. Current state and index coverage remain unknown.", annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=open_world))
+    async def read_successor_evidence(predecessor_path: str) -> Any:
+        return await successor_bridge.inspect(predecessor_path)
+
+    @mcp.tool(description="Explicit literal Memory source scan and bounded full-source verification. Scanning can lock the store and recover pending operations; do not use for unresolved operations. Complete coverage is unknown.", annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=open_world))
+    def memory_literal_verified(query: str, max_reads: int = 6) -> Any:
+        from .literal_search import verify_literal
+        from mcp.server.mcpserver.exceptions import ToolError
+        status = call("health", {})
+        if not isinstance(status, dict) or status.get("ok") is not True or status.get("pending_operations") != 0:
+            raise ToolError("startup_or_pending_unconfirmed")
+        return verify_literal(query, lambda q: call("search", {"store": "memory", "query": q}),
+                              lambda path: call("read", {"relative": path}), max_hits=max_reads)
 
     @mcp.tool(description="Catch up the isolated index for a committed Memory note and verify its exact revision and full source. A timeout never rolls back the write.", annotations=write_hint)
     async def memory_index_refresh(identifier: str, expected_revision: str,

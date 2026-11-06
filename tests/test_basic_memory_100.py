@@ -78,6 +78,12 @@ class NativeIndex(unittest.TestCase):
                                actor='fixture', scopes={'read'})
             self.assertTrue(any(hit.get('read_path') == result['path'] for hit in natural['results']))
             self.assertEqual(store.read(result['path'])['revision'], result['revision'])
+            from aios.bounded_body_proof import BodyProof
+            def rpc(operation, params):
+                return dispatch(store, operation, params, actor='fixture', scopes={'read'})
+            proof = BodyProof(rpc, timeout=15).check(result['path'], result['revision'],
+                                                    'fictionaluniquesearchmarker')
+            self.assertTrue(proof['ready'], proof)
             # Remove only this fictional FTS row; repair must restore it while
             # leaving the committed source bytes unchanged.
             index = load_index(store.root)
