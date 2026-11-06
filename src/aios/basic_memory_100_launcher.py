@@ -43,7 +43,7 @@ def _check_upstream() -> None:
         raise RuntimeError('unsupported Basic Memory indexer build')
 
 
-def _run_indexer() -> None:
+def _install_source_preserving_indexer() -> None:
     from basic_memory.indexing.batch_indexer import BatchIndexer, _PreparedMarkdownFile
 
     async def normalize(self, prepared, reserved_permalinks, *, existing_permalink=None):
@@ -61,6 +61,11 @@ def _run_indexer() -> None:
 
     BatchIndexer._normalize_markdown_file = normalize
     BatchIndexer._reconcile_persisted_permalink = reconcile
+
+
+def _run_indexer() -> None:
+    _check_upstream()
+    _install_source_preserving_indexer()
     from basic_memory.cli.main import app
     sys.exit(app())
 

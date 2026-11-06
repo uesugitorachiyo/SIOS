@@ -1,6 +1,8 @@
 """The optional stdio adapter must register against the pinned MCP 2.x API."""
 
 import asyncio
+import hashlib
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -30,10 +32,35 @@ class MCPAdapterTests(unittest.TestCase):
             server = start.call_args.args[0]
             names = {tool.name for tool in asyncio.run(server.list_tools())}
             self.assertTrue({"identity", "read", "catalog", "memory_write", "memory_index_refresh",
-                             "memory_index_search", "memory_search_verified", "memory_capture",
+                             "memory_index_search", "memory_search_verified", "memory_capture", "memory_capture_readiness",
                              "thread_create", "thread_post", "thread_list", "thread_read",
                              "thread_fetch", "thread_ack", "thread_close", "thread_revoke"} <= names)
             self.assertNotIn("brain_apply", names)
+
+    def test_capture_readiness_uses_only_existing_read_calls(self):
+        from mcp.server.mcpserver import MCPServer
+        stem = 'selective-' + 'a' * 64
+        path = 'Memory/notes/' + stem + '.md'
+        body = '# Fictional record\n'
+        revision = hashlib.sha256(body.encode()).hexdigest()
+        status = {'total_files': 1, 'observed_files': [{'path': 'notes/' + stem + '.md', 'checksum': revision}]}
+        search = {'results': [{'title': stem, 'type': 'entity', 'file_path': 'notes/' + stem + '.md', 'read_path': path}],
+                  'total': 1, 'has_more': False, 'current_page': 1, 'page_size': 10, 'total_is_exact': True}
+        responses = {'health': {'ok': True, 'database': 'ok'}, 'memory_index_status': status,
+                     'memory_index_search': search, 'read': {'path': path, 'revision': revision, 'text': body}}
+        with tempfile.TemporaryDirectory(prefix='sios-mcp-') as raw:
+            root = Path(raw)
+            cfg = Config('client', '00000000-0000-4000-8000-000000000001', root/'data', root/'cache',
+                         'UTC', 'https://127.0.0.1:9443', root/'client.json')
+            with patch('aios.mcp_adapter.Client') as client, patch.object(MCPServer, 'run', autospec=True) as start:
+                client.return_value.call.side_effect = lambda op, params: responses[op]
+                run(cfg)
+                result = asyncio.run(start.call_args.args[0].call_tool(
+                    'memory_capture_readiness', {'path': path, 'revision': revision}))
+            self.assertFalse(result.is_error)
+            self.assertTrue(json.loads(result.content[0].text)['ready'])
+            self.assertEqual([item.args[0] for item in client.return_value.call.call_args_list],
+                             ['health', 'memory_index_status', 'memory_index_search', 'read', 'memory_index_status'])
 
     def test_verified_search_uses_registered_connection(self):
         from mcp.server.mcpserver import MCPServer

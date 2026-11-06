@@ -27,3 +27,34 @@ verification; index coverage and correction completeness remain unknown.
 
 Install the 0.23.2 and 1.0.0 extras in separate environments. The latter has
 not been qualified on Windows, Linux, or with every external OKF consumer.
+
+## Optional single-file repair
+
+The server's retry worker can optionally repair a missing index entry for an
+already committed note. This is disabled by default and is restricted to
+macOS. For a trusted, dedicated 1.0 environment, set these environment
+variables on the server process before starting it:
+
+```sh
+SIOS_REPAIR_100_ENABLED=1
+SIOS_REPAIR_PYTHON=/absolute/path/to/venv/bin/python
+SIOS_REPAIR_VENDOR=/absolute/path/to/trusted/import-directory
+SIOS_REPAIR_CACHE=/absolute/path/to/writable/cache-directory
+```
+
+The Python environment must contain this SIOS package and the pinned Basic
+Memory 1.0.0 build. The import directory must be a trusted existing directory;
+it is added to the Python import path, so it must not be writable by untrusted
+users. The worker checks the project binding, note revision and pinned upstream
+indexer, and runs the repair in a macOS sandbox that denies networking, forks
+and writes to the Memory source tree. A durable marker records uncertain
+outcomes; an unconfirmed repair is not reported as successful. Do not change
+these settings for an existing service without separately checking its runtime
+and recovery procedures. This does not provide a backup or fence other processes
+that already have access to the source tree.
+
+`memory_capture_readiness` is a separate bounded observation of an already
+committed selective note. It checks an exact-stem search result, index checksums
+and a full source read using existing read access. It never repeats a capture;
+it does not prove index completeness, natural-language recall or an atomic
+snapshot. A timeout or conflicting evidence returns unconfirmed.

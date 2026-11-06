@@ -72,6 +72,9 @@ def run(cfg: Config, ca_file: Path | None = None) -> None:
         except Exception:
             raise RuntimeError("internal_error") from None
 
+    from .client_ready_proof import CaptureReadiness
+    ready_proof = CaptureReadiness(call, timeout=15)
+
     @mcp.tool(description="Read one allowed Markdown document or run metadata by relative path.", annotations=read_hint)
     def read(relative: str) -> Any:
         return call("read", {"relative": relative})
@@ -128,6 +131,10 @@ def run(cfg: Config, ca_file: Path | None = None) -> None:
     def memory_index_status() -> Any:
         return call("memory_index_status", {})
 
+    @mcp.tool(description="Observe exact-stem search visibility and source checksum of an already committed selective note. Reads may invoke recovery or synchronization. This does not prove complete index coverage or an atomic snapshot.", annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=open_world))
+    async def memory_capture_readiness(path: str, revision: str) -> Any:
+        return await asyncio.to_thread(ready_proof.observe, path, revision)
+
     @mcp.tool(description="Catch up the isolated index for a committed Memory note and verify its exact revision and full source. A timeout never rolls back the write.", annotations=write_hint)
     async def memory_index_refresh(identifier: str, expected_revision: str,
                                    query: str, timeout: int = 30) -> Any:
@@ -180,7 +187,11 @@ def run(cfg: Config, ca_file: Path | None = None) -> None:
                 if (not isinstance(conditions, list) or
                         any(not isinstance(item, str) for item in conditions)):
                     raise ToolError("invalid_request: conditions must be a list of strings") from None
-            return call("memory_capture", {"request_json": request_json})
+                if len(conditions) > 12 or any(len(item) > 300 or not item.strip() or "\x00" in item for item in conditions):
+                    raise ToolError("invalid_conditions: use at most 12 nonempty entries of at most 300 characters; no request was sent") from None
+                if len({item.strip() for item in conditions}) != len(conditions):
+                    raise ToolError("invalid_conditions: entries must be distinct; no request was sent") from None
+            return ready_proof.review(call("memory_capture", {"request_json": request_json}))
 
         @mcp.tool(description="Create one bounded project discussion. Requires an enabled server-side thread ACL and threads:create plus threads:read scopes. Participant IDs must be authenticated configured principals with the same project grant.", annotations=write_hint)
         def thread_create(project: str, purpose: str, participants: list[str], request_id: str,

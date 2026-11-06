@@ -10,7 +10,7 @@ import stat
 import subprocess
 from functools import partial
 
-PROGRAM = '''import asyncio,sys\nfrom basic_memory.mcp.async_client import _asgi_client,_build_timeout\nasync def run():\n async with _asgi_client(_build_timeout()) as c:\n  r=await c.post('/v2/projects/'+sys.argv[1]+'/knowledge/index-file',json={'file_path':sys.argv[2]})\n  if r.status_code!=200: raise SystemExit(1)\nasyncio.run(run())\n'''
+PROGRAM = '''import asyncio,sys\nfrom aios.basic_memory_100_launcher import _check_upstream,_install_source_preserving_indexer\n_check_upstream()\n_install_source_preserving_indexer()\nfrom basic_memory.mcp.async_client import _asgi_client,_build_timeout\nasync def run():\n async with _asgi_client(_build_timeout()) as c:\n  r=await c.post('/v2/projects/'+sys.argv[1]+'/knowledge/index-file',json={'file_path':sys.argv[2]})\n  if r.status_code!=200: raise SystemExit(1)\nasyncio.run(run())\n'''
 
 
 def from_environment(environment):

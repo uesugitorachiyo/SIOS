@@ -3,6 +3,7 @@ import asyncio
 import hashlib
 import json
 import os
+import sqlite3
 from pathlib import Path
 import tempfile
 import unittest
@@ -77,3 +78,21 @@ class NativeIndex(unittest.TestCase):
                                actor='fixture', scopes={'read'})
             self.assertTrue(any(hit.get('read_path') == result['path'] for hit in natural['results']))
             self.assertEqual(store.read(result['path'])['revision'], result['revision'])
+            # Remove only this fictional FTS row; repair must restore it while
+            # leaving the committed source bytes unchanged.
+            index = load_index(store.root)
+            relative = result['path'].removeprefix('Memory/')
+            with sqlite3.connect(index.config_dir / 'memory.db') as db:
+                db.execute('DELETE FROM search_index WHERE file_path=?', (relative,))
+            self.assertFalse(index._indexed_checksums_match({relative: result['revision']}))
+            source = store.root / result['path']
+            before = hashlib.sha256(source.read_bytes()).hexdigest()
+            from aios.index_repair_100 import repair
+            venv = Path(os.environ['SIOS_TEST_BM100_LAUNCHER']).parent
+            cache = root / 'repair-cache'; cache.mkdir()
+            vendor = root / 'trusted-imports'; vendor.mkdir()
+            repaired = repair(index, rel_path=relative, expected_revision=result['revision'],
+                              python=venv / 'python', vendor=vendor, cache=cache, timeout=40)
+            self.assertTrue(repaired['settled'])
+            self.assertTrue(index._indexed_checksums_match({relative: result['revision']}))
+            self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), before)
