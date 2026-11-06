@@ -76,9 +76,11 @@ class IndexedNoteTests(unittest.TestCase):
         async def ready(query, timeout=30, target_path=None):
             return {"ready": True, "search": {"results": [{"title": "Sample", "type": "entity",
                 "score": 0.9, "file_path": "notes/sample.md",
-                "matched_chunk": query + " lantern"}]}}
+                "matched_chunk": query}]}}
         class Index:
             wait_ready = staticmethod(ready)
+            def _indexed_checksums_match(self, expected):
+                return True
         return Index()
 
     def test_create_refresh_read_update_and_idempotent_retry(self):

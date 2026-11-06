@@ -1,5 +1,6 @@
 """Capture stays committed and scoped when automatic index refresh fails."""
 import json
+import hashlib
 from contextlib import closing
 from pathlib import Path
 import sqlite3
@@ -125,22 +126,27 @@ class CaptureIndexTests(unittest.TestCase):
         root = Path(self.temp.name).resolve()
         index_dir = root / 'index'
         index_dir.mkdir()
-        (self.store.root / 'Memory').mkdir()
+        (self.store.root / 'Memory' / 'notes').mkdir(parents=True)
+        body = '# Sample\nfictional searchable content\n'
+        (self.store.root / 'Memory' / 'notes' / 'sample.md').write_text(body)
+        revision = hashlib.sha256(body.encode()).hexdigest()
         index = BasicMemoryIndex(sys.executable, index_dir, self.store.root / 'Memory', 'sios-test')
         with closing(sqlite3.connect(index_dir / 'memory.db')) as db:
             db.execute('CREATE TABLE project(id INTEGER, name TEXT, path TEXT)')
-            db.execute('CREATE TABLE entity(project_id INTEGER, file_path TEXT, checksum TEXT)')
+            db.execute('CREATE TABLE entity(id INTEGER, project_id INTEGER, file_path TEXT, checksum TEXT)')
+            db.execute("CREATE VIRTUAL TABLE search_index USING fts5(id UNINDEXED,project_id UNINDEXED,file_path UNINDEXED,type UNINDEXED,content_snippet,tokenize='unicode61 tokenchars 0x2F')")
             db.execute('INSERT INTO project VALUES(?, ?, ?)', (1, 'sios-test', str(index.memory_root)))
-            db.execute('INSERT INTO entity VALUES(?, ?, ?)', (1, 'notes/sample.md', 'a' * 64))
+            db.execute('INSERT INTO entity VALUES(?, ?, ?, ?)', (1, 1, 'notes/sample.md', revision))
+            db.execute('INSERT INTO search_index(id,project_id,file_path,type,content_snippet) VALUES(?,?,?,?,?)', (1, 1, 'notes/sample.md', 'entity', body.strip()))
             db.commit()
-        self.assertTrue(index._indexed_checksums_match({'notes/sample.md': 'a' * 64}))
+        self.assertTrue(index._indexed_checksums_match({'notes/sample.md': revision}))
         self.assertFalse(index._indexed_checksums_match({'notes/sample.md': 'b' * 64}))
         self.assertFalse(index._indexed_checksums_match({'notes/other.md': 'a' * 64}))
         with closing(sqlite3.connect(index_dir / 'memory.db')) as db:
             db.execute('UPDATE project SET name=?', ('other-project',))
             db.commit()
         with self.assertRaises(BasicMemoryError):
-            index._indexed_checksums_match({'notes/sample.md': 'a' * 64})
+            index._indexed_checksums_match({'notes/sample.md': revision})
 
 
 if __name__ == '__main__':

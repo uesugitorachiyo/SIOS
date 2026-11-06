@@ -77,6 +77,7 @@ def parser():
     index_setup = commands.add_parser("index-setup", help="Configure a separate local Basic Memory index")
     index_setup.add_argument("--executable", default="basic-memory")
     index_setup.add_argument("--index-root", type=Path)
+    index_setup.add_argument("--basic-memory-version", choices=("0.23.2", "1.0.0"), default="0.23.2")
     commands.add_parser("index-status")
     index_search = commands.add_parser("index-search")
     index_search.add_argument("query")
@@ -271,7 +272,8 @@ def main(argv=None):
                 executable = shutil.which(args.executable)
                 if not executable:
                     raise ValueError("Basic Memory executable is unavailable")
-                result = setup_index(cfg, str(Path(executable).absolute()), args.index_root)
+                result = setup_index(cfg, str(Path(executable).absolute()), args.index_root,
+                                     version=args.basic_memory_version)
             else:
                 result = asyncio.run(load_index(cfg.data_root).wait_ready(args.query, timeout=args.timeout))
             print(json.dumps(result, default=str, ensure_ascii=False, indent=2))

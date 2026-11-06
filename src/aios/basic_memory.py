@@ -7,6 +7,7 @@ The only setup mutation is Basic Memory's own configuration/database state in
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 import os
 import asyncio
@@ -16,6 +17,7 @@ import re
 import sqlite3
 import stat
 import subprocess
+import time
 
 from .pathutils import file_snapshot_identity, native_path, stable_file_identity
 
@@ -424,28 +426,75 @@ class BasicMemoryIndex:
             raise BasicMemoryError("scoped Basic Memory refresh unavailable") from None
 
     def _indexed_checksums_match(self, expected: dict[str, str | None]) -> bool:
-        """Read the pinned local index without opening a write connection."""
+        """Conservatively check source, entity and full FTS postings together."""
         database = self.config_dir / 'memory.db'
         _check_node(database)
         if not database.is_file():
             return False
         try:
             with closing(sqlite3.connect(database.as_uri() + '?mode=ro', uri=True, timeout=0.25)) as db:
+                db.execute('CREATE VIRTUAL TABLE temp.sios_vocab USING fts5vocab(main,search_index,instance)')
                 db.execute('PRAGMA query_only=ON')
+                db.execute('BEGIN')
+                deadline = time.monotonic() + 1.0
+                db.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
                 projects = db.execute('SELECT id, name, path FROM project').fetchall()
                 if (len(projects) != 1 or projects[0][1] != self.project or
                         Path(projects[0][2]).resolve() != self.memory_root.resolve()):
                     raise BasicMemoryError('index project does not match binding')
                 project_id = projects[0][0]
                 for path, checksum in expected.items():
-                    rows = db.execute('SELECT checksum FROM entity WHERE project_id=? AND file_path=?',
+                    rows = db.execute('SELECT id, checksum FROM entity WHERE project_id=? AND file_path=?',
                                       (project_id, path)).fetchall()
-                    if rows != ([] if checksum is None else [(checksum,)]):
+                    if checksum is None:
+                        if rows:
+                            return False
+                        # A deleted document must leave no entity, observation,
+                        # relation, or future search-row type at this path.
+                        if db.execute("SELECT 1 FROM search_index WHERE project_id=? AND file_path=? LIMIT 1", (project_id, path)).fetchone():
+                            return False
+                        continue
+                    if len(rows) != 1 or rows[0][1] != checksum:
+                        return False
+                    source = self.memory_root / path
+                    _check_node(source)
+                    descriptor = os.open(source, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
+                    with os.fdopen(descriptor, 'rb') as stream:
+                        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                            return False
+                        raw = stream.read(131073)
+                    if len(raw) > 131072 or hashlib.sha256(raw).hexdigest() != checksum:
+                        return False
+                    text = raw.decode('utf-8')
+                    if text.startswith('---\n'):
+                        parts = text.split('---\n', 2)
+                        if len(parts) != 3:
+                            return False
+                        body = parts[2].strip()
+                    else:
+                        body = text.strip()
+                    if not body or '\x00' in body:
+                        return False
+                    fts = db.execute("SELECT rowid,id,content_snippet FROM search_index WHERE project_id=? AND file_path=? AND type='entity'", (project_id, path)).fetchall()
+                    if len(fts) != 1 or str(fts[0][1]) != str(rows[0][0]) or fts[0][2] != body:
+                        return False
+                    with closing(sqlite3.connect(':memory:')) as reference:
+                        reference.execute("CREATE VIRTUAL TABLE expected USING fts5(content_snippet, tokenize='unicode61 tokenchars 0x2F')")
+                        reference.execute('INSERT INTO expected(content_snippet) VALUES(?)', (body,))
+                        reference.execute('CREATE VIRTUAL TABLE temp.expected_vocab USING fts5vocab(main,expected,instance)')
+                        wanted = reference.execute("SELECT term,offset FROM expected_vocab WHERE doc=1 AND col='content_snippet' ORDER BY term,offset LIMIT 50001").fetchall()
+                    found = db.execute("SELECT term,offset FROM temp.sios_vocab WHERE doc=? AND col='content_snippet' ORDER BY term,offset LIMIT 50001", (fts[0][0],)).fetchall()
+                    if not wanted or len(wanted) > 50000 or found != wanted:
+                        return False
+                    descriptor = os.open(source, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
+                    with os.fdopen(descriptor, 'rb') as stream:
+                        latest = stream.read(131073)
+                    if len(latest) > 131072 or hashlib.sha256(latest).hexdigest() != checksum:
                         return False
             return True
         except sqlite3.OperationalError:
             return False
-        except (sqlite3.Error, OSError, TypeError, ValueError):
+        except (sqlite3.Error, OSError, TypeError, ValueError, UnicodeError):
             raise BasicMemoryError('index checksum observation unavailable') from None
 
     async def wait_for_files(self, expected: dict[str, str | None], timeout: float = 7) -> bool:

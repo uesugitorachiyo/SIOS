@@ -62,20 +62,35 @@ def load_index(root: Path) -> BasicMemoryIndex:
         raise BasicMemoryError('invalid_historical_index_binding')
     try:
         settings = json.loads(path.read_text(encoding='utf-8'))
-        if set(settings) != {'schema_version', 'executable', 'config_dir', 'project'} or settings['schema_version'] != 1:
+        if set(settings) != {'schema_version', 'executable', 'config_dir', 'project'} or settings['schema_version'] not in (1, 2):
             raise ValueError()
+        if settings['schema_version'] == 2:
+            if Path(settings['executable']).name != 'sios-basic-memory-100':
+                raise ValueError()
+            from .basic_memory_100 import BasicMemoryIndex as Index100
+            return Index100(settings['executable'], Path(settings['config_dir']), root/'Memory', settings['project'])
         return BasicMemoryIndex(settings['executable'], Path(settings['config_dir']), root/'Memory', settings['project'])
     except (ValueError, TypeError, KeyError, OSError):
         raise BasicMemoryError('invalid_historical_index_binding') from None
 
 
-def setup_index(config: Config, executable: str, index_root: Path | None = None) -> dict:
+def setup_index(config: Config, executable: str, index_root: Path | None = None, *, version: str = '0.23.2') -> dict:
     if config.mode == 'client':
         raise BasicMemoryError('index_setup_requires_authoritative_host')
     directory = index_root or config.data_root/'Database'/'basic-memory'
     project = 'aios-' + config.instance_id
-    adapter = BasicMemoryIndex(executable, directory, config.data_root/'Memory', project)
-    settings = {'schema_version': 1, 'executable': executable,
+    if version == '1.0.0':
+        if Path(executable).name != 'sios-basic-memory-100':
+            raise BasicMemoryError('Basic Memory 1.0 requires the source-protecting launcher')
+        from .basic_memory_100 import BasicMemoryIndex as Index100
+        adapter = Index100(executable, directory, config.data_root/'Memory', project)
+        schema_version = 2
+    elif version == '0.23.2':
+        adapter = BasicMemoryIndex(executable, directory, config.data_root/'Memory', project)
+        schema_version = 1
+    else:
+        raise BasicMemoryError('unsupported_historical_index_version')
+    settings = {'schema_version': schema_version, 'executable': executable,
                 'config_dir': str(adapter.config_dir), 'project': project}
     binding = config.data_root/BINDING
     Store._check_node(binding)
