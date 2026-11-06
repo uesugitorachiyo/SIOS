@@ -58,3 +58,8 @@ committed selective note. It checks an exact-stem search result, index checksums
 and a full source read using existing read access. It never repeats a capture;
 it does not prove index completeness, natural-language recall or an atomic
 snapshot. A timeout or conflicting evidence returns unconfirmed.
+
+The macOS repair tests cover a live child retaining its lock after its
+supervisor exits, a changed source or binding, a replaced lock, and an unknown
+marker protocol. These isolated fictional tests exercise bounded failure
+handling; they do not prove that unrelated or detached processes are fenced.
