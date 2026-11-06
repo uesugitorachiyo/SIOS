@@ -175,6 +175,28 @@ class MCPAdapterTests(unittest.TestCase):
             self.assertNotIn('synthetic private detail', str(proof))
             self.assertEqual([x.args[0] for x in normal.call.call_args_list], ['memory_capture'])
 
+    def test_refresh_rejects_path_without_sending_request_or_echoing_input(self):
+        from mcp.server.mcpserver import MCPServer
+        from mcp.server.mcpserver.exceptions import ToolError
+        with tempfile.TemporaryDirectory(prefix='sios-mcp-') as raw:
+            root = Path(raw)
+            cfg = Config('client', '00000000-0000-4000-8000-000000000001', root/'data', root/'cache',
+                         'UTC', 'https://127.0.0.1:9443', root/'client.json')
+            with patch('aios.mcp_adapter.Client') as client, patch.object(MCPServer, 'run', autospec=True) as start:
+                run(cfg)
+                for invalid in ('Memory/notes/fiction.md', 'fiction.md', 'UPPER', 'bad name', 'con', '../x'):
+                    with self.subTest(invalid=invalid), self.assertRaises(ToolError) as caught:
+                        asyncio.run(start.call_args.args[0].call_tool('memory_index_refresh',
+                            {'identifier': invalid, 'expected_revision': 'a'*64, 'query': 'fiction'}))
+                    self.assertIn('invalid_identifier', str(caught.exception))
+                    self.assertNotIn(invalid, str(caught.exception))
+                client.return_value.call.assert_not_called()
+                client.return_value.call.return_value = {'ready': False}
+                response = asyncio.run(start.call_args.args[0].call_tool('memory_index_refresh',
+                    {'identifier': 'fiction', 'expected_revision': 'a'*64, 'query': 'fiction'}))
+                self.assertFalse(response.is_error)
+                self.assertEqual(client.return_value.call.call_args.args[1]['identifier'], 'fiction')
+
     def test_verified_search_uses_registered_connection(self):
         from mcp.server.mcpserver import MCPServer
         with tempfile.TemporaryDirectory(prefix="sios-mcp-") as raw:

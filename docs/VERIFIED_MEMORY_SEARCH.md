@@ -39,3 +39,9 @@ observation cannot finish, readiness remains unconfirmed; capture uses the
 normal client and is not retried by the observation. The outer observation
 also has a deadline and may retain its worker slot until an in-flight request
 actually returns.
+
+For `memory_index_refresh`, pass the note's canonical filename stem as
+`identifier` (for example `example-note`), without `Memory/notes/` or `.md`.
+The client rejects invalid stems before making a request and does not echo the
+submitted identifier in the error. A timeout after a valid request remains an
+unknown outcome and does not roll back a committed note.

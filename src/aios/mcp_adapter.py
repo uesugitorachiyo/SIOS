@@ -167,9 +167,18 @@ def run(cfg: Config, ca_file: Path | None = None) -> None:
         return verify_literal(query, lambda q: call("search", {"store": "memory", "query": q}),
                               lambda path: call("read", {"relative": path}), max_hits=max_reads)
 
-    @mcp.tool(description="Catch up the isolated index for a committed Memory note and verify its exact revision and full source. A timeout never rolls back the write.", annotations=write_hint)
+    @mcp.tool(description="Catch up the isolated index for a committed Memory note and verify its exact revision and full source. Identifier must be the canonical note filename stem, without a path or .md extension. A timeout never rolls back the write.", annotations=write_hint)
     async def memory_index_refresh(identifier: str, expected_revision: str,
                                    query: str, timeout: int = 30) -> Any:
+        from .identifiers import portable_component
+        from mcp.server.mcpserver.exceptions import ToolError
+        try:
+            valid = portable_component(identifier) == identifier
+        except (TypeError, ValueError):
+            valid = False
+        if not valid:
+            # Never include the submitted string in the error or send an RPC.
+            raise ToolError("invalid_identifier: use the canonical note filename stem without a path or .md extension") from None
         return await asyncio.to_thread(call, "memory_index_refresh", {"identifier": identifier,
             "expected_revision": expected_revision, "query": query, "timeout": timeout})
 
