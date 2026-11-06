@@ -105,6 +105,25 @@ def run(cfg: Config, ca_file: Path | None = None) -> None:
     def memory_index_search(query: str) -> Any:
         return call("memory_index_search", {"query": query})
 
+    @mcp.tool(description="Search indexed Memory and verify full sources and referenced notes. Index coverage and current state remain unknown; reads can trigger server recovery or index synchronization.", annotations=read_hint)
+    def memory_search_verified(query: str, max_reads: int = 6) -> Any:
+        from .search_resolver import resolve_search_verified
+        from mcp.server.mcpserver.exceptions import ToolError
+        status = call("health", {})
+        if not isinstance(status, dict) or status.get("ok") is not True:
+            raise RuntimeError("startup_health_failed")
+        def read_verified(path: str) -> Any:
+            try:
+                return call("read", {"relative": path})
+            except RuntimeError as exc:
+                raise ToolError(str(exc)) from None
+        return resolve_search_verified(
+            query,
+            lambda value: call("memory_index_search", {"query": value}),
+            read_verified,
+            max_reads=max_reads,
+        )
+
     @mcp.tool(description="Show freshness of the configured historical index, if configured.", annotations=read_hint)
     def memory_index_status() -> Any:
         return call("memory_index_status", {})
