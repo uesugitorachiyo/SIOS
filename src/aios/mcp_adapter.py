@@ -72,10 +72,20 @@ def run(cfg: Config, ca_file: Path | None = None) -> None:
         except Exception:
             raise RuntimeError("internal_error") from None
 
+    # Observation calls have their own bounded transport. A slow proof must
+    # not change the normal client's timeout or prevent a committed capture.
+    if remote is not None:
+        try:
+            proof_call = Client(cfg, ca_file=ca_file, timeout=6).call
+        except Exception:
+            def proof_call(operation: str, params: dict[str, Any]) -> Any:
+                raise RuntimeError("proof_client_unavailable") from None
+    else:
+        proof_call = call
     from .client_ready_proof import CaptureReadiness
-    ready_proof = CaptureReadiness(call, timeout=15)
+    ready_proof = CaptureReadiness(proof_call, timeout=15)
     from .bounded_body_proof import BodyProof
-    body_proof = BodyProof(call, timeout=15)
+    body_proof = BodyProof(proof_call, timeout=15)
     from .successor_mcp_bridge import SuccessorBridge
     successor_bridge = SuccessorBridge(call)
 

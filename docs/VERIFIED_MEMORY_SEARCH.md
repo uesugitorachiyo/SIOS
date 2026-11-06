@@ -32,3 +32,10 @@ The MCP client also exposes three bounded evidence helpers:
 These helpers use the existing read scope; they do not add an access grant.
 Results are observations rather than guarantees of complete coverage, and
 underlying reads or searches may synchronize or recover state.
+
+In remote client mode, capture-readiness observations use a separate client
+with a six-second transport timeout. If that client cannot be created or the
+observation cannot finish, readiness remains unconfirmed; capture uses the
+normal client and is not retried by the observation. The outer observation
+also has a deadline and may retain its worker slot until an in-flight request
+actually returns.

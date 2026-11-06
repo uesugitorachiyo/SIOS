@@ -6,7 +6,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from aios.config import Config
 from aios.mcp_adapter import run
@@ -137,6 +137,43 @@ class MCPAdapterTests(unittest.TestCase):
                 with self.assertRaises(ToolError):
                     asyncio.run(start.call_args.args[0].call_tool('memory_literal_verified', {'query': 'fiction'}))
             self.assertEqual([x.args[0] for x in client.return_value.call.call_args_list], ['health'])
+
+    def test_proofs_have_separate_short_timeout_client(self):
+        from mcp.server.mcpserver import MCPServer
+        with tempfile.TemporaryDirectory(prefix='sios-mcp-') as raw:
+            root = Path(raw)
+            cfg = Config('client', '00000000-0000-4000-8000-000000000001', root/'data', root/'cache',
+                         'UTC', 'https://127.0.0.1:9443', root/'client.json')
+            normal, proof = Mock(), Mock()
+            proof.call.return_value = {'ok': False}
+            with patch('aios.mcp_adapter.Client', side_effect=[normal, proof]) as factory, \
+                 patch.object(MCPServer, 'run', autospec=True) as start:
+                run(cfg)
+                result = asyncio.run(start.call_args.args[0].call_tool('memory_capture_body_readiness',
+                    {'path': 'Memory/notes/selective-' + 'a'*64 + '.md', 'revision': 'b'*64, 'marker': 'fiction'}))
+            self.assertFalse(json.loads(result.content[0].text)['ready'])
+            self.assertEqual(factory.call_args_list[1].kwargs['timeout'], 6)
+            self.assertEqual(proof.call.call_args.args[0], 'health')
+            normal.call.assert_not_called()
+
+    def test_failed_proof_client_does_not_disable_capture(self):
+        from mcp.server.mcpserver import MCPServer
+        with tempfile.TemporaryDirectory(prefix='sios-mcp-') as raw:
+            root = Path(raw)
+            cfg = Config('client', '00000000-0000-4000-8000-000000000001', root/'data', root/'cache',
+                         'UTC', 'https://127.0.0.1:9443', root/'client.json')
+            normal = Mock()
+            normal.call.return_value = {'status': 'skipped'}
+            with patch('aios.mcp_adapter.Client', side_effect=[normal, RuntimeError('synthetic private detail')]), \
+                 patch.object(MCPServer, 'run', autospec=True) as start:
+                run(cfg)
+                result = asyncio.run(start.call_args.args[0].call_tool('memory_capture', {'request_json': '{"retain":false}'}))
+                proof = asyncio.run(start.call_args.args[0].call_tool('memory_capture_body_readiness',
+                    {'path': 'Memory/notes/selective-' + 'a'*64 + '.md', 'revision': 'b'*64, 'marker': 'fiction'}))
+            self.assertEqual(json.loads(result.content[0].text)['status'], 'skipped')
+            self.assertFalse(json.loads(proof.content[0].text)['ready'])
+            self.assertNotIn('synthetic private detail', str(proof))
+            self.assertEqual([x.args[0] for x in normal.call.call_args_list], ['memory_capture'])
 
     def test_verified_search_uses_registered_connection(self):
         from mcp.server.mcpserver import MCPServer
