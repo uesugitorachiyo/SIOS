@@ -66,9 +66,71 @@ search. The basic Memory profile does not automatically configure Hindsight.
 
 The profile offers client-side `memory_capture_readiness` and
 `read_successor_evidence`, but neither proves complete index coverage or
-current state. The source does not include a deployment-specific
-integrity-pinned direct launcher or the
-private selected-Hindsight gateway. Do not replace a working installation with
+current state. The optional selected-sync facade below still requires an
+independently provisioned and qualified forced-command server gateway. The
+optional pinned Windows launcher below
+is a source candidate, not a qualified replacement for an existing launcher.
+Do not replace a working installation with
 this profile until the required tool surface, scopes, startup behavior and
 rollback have been checked in a new native application session. Publishing
 these templates does not install or upgrade the satellite clients.
+
+## Optional pinned Windows launcher candidate
+
+`templates/windows-pinned-mcp.py` starts the full or bounded MCP module using a
+separately provisioned runtime and a private profile. Run it with that runtime's
+Python using `-I -S -B`, `--profile` and an independently recorded
+`--profile-sha256`. Profile JSON has exactly these keys:
+
+- `root`: absolute private root; all other paths below are slash-separated paths
+  relative to that root: `runtime`, `config_file`, `ca_file`, `secret_file`,
+  `package_root`, `manifest_file`.
+- `runtime_sha256`, `ca_sha256`, `manifest_sha256`: lowercase SHA-256 hashes
+  of the exact files. `manifest_file` is a JSON object mapping each relative
+  `aios/...` package file, case-insensitively, to its lowercase SHA-256. The
+  launcher rejects missing or extra package files, bytecode and reparse points.
+- `config`: exactly `mode`, `instance_id`, `endpoint`, `token_env`; these must
+  match the private configuration. Mode must be `client`, the endpoint HTTPS,
+  and the token variable must match `SIOS_[A-Z0-9_]*TOKEN`.
+- `module`: `aios.memory_mcp` for the bounded profile or `aios` for the full
+  profile. The latter exposes a broader surface and still uses server scopes.
+- `distributions`: a map of locally expected package versions, including
+  `mcp` and `pydantic`, checked against runtime metadata before token decryption.
+
+Keep the profile, DPAPI token, CA and manifest outside the repository. The
+profile hash must come from an independent trusted deployment record; a hash
+beside a mutable profile is not authentication. The launcher pins the Python
+executable bytes and package tree, but version metadata is not a dependency
+file hash or publisher signature. Its runtime, standard library, dependencies,
+private directory, credential enrollment and same-user processes remain trusted.
+Paths and hashes are checked before launch, not protected against subsequent
+same-user replacement. Native application startup and rollback need separate
+qualification before replacing a current installation.
+
+## Optional selected-Hindsight client facade
+
+`sios-selected-sync` is a Windows stdio MCP client for an existing, dedicated
+forced-command SSH gateway. It requires `--ssh`, `--key`, `--known-hosts`,
+`--host`, and `--hostkey-alias` arguments; paths must be absolute regular files
+without symlink or reparse-point ancestors. `--port` defaults to 22. Keep all
+actual endpoint, identity, key and host-key configuration outside the checkout.
+It disables SSH config files, agent forwarding and connection forwarding, uses
+only the named identity, verifies the host key, and sends one bounded request
+on stdin. The server must force the intended command for that key.
+
+The facade exposes inspection, explicitly reviewed submission and reconciliation
+as separate tools. It reports `automatic_retry: false` and makes no automatic
+retry after timeout, transport failure or unknown response. The client cannot
+prevent a user or another client from issuing a second submission: the remote
+gateway must authenticate and authorize the principal, independently review the
+source, bind the exact revision and destination, preserve a durable attempt
+journal, and reject a repeated or unresolved submission. A read-only inspection
+does not demonstrate successful Hindsight delivery. The gateway's own
+reconciliation may update its journal and must never resend an unknown request.
+
+This repository does not ship the owner-specific gateway, bank mappings, legacy
+exceptions, credentials or existing attempt journal. Do not point this facade
+at an arbitrary SSH shell or treat it as a complete gateway installation. A
+rebuild or journal replacement must preserve and independently reconcile the
+old history before any selected write. Native checks with fictional data do not
+qualify a real bank, server-side access policy or cross-writer fence.

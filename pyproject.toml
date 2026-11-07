@@ -26,6 +26,7 @@ Repository = "https://github.com/uesugitorachiyo/SIOS"
 [project.scripts]
 sios = "aios.cli:main"
 sios-memory = "aios.memory_mcp:main"
+sios-selected-sync = "aios.selected_sync_mcp:main"
 sios-evidence-search = "aios.evidence_search_web:main"
 
 [tool.setuptools.packages.find]
