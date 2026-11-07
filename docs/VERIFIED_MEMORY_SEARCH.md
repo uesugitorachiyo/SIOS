@@ -52,3 +52,9 @@ marker and source revision. The result includes `atomic_snapshot: false`,
 files can change between or immediately after the individual checks; a positive
 result does not fence other writers or establish continuing search visibility.
 Consumers using strict response schemas must allow these additional fields.
+
+`declared_corrections` reports an explicit predecessor relationship only when
+both selective notes were read and their source revisions verified within the
+read budget. Search snippets alone do not establish a relationship. Missing
+results, unread notes, and index coverage remain unknown; a reported edge does
+not establish which decision is current.
