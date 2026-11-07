@@ -34,6 +34,9 @@ class RefreshTests(unittest.TestCase):
         with patch('aios.indexed_note.load_index', return_value=index):
             result=refresh(Store(),'fiction','a'*64,'markerx')
         self.assertTrue(result['ready'])
+        self.assertFalse(result['atomic_snapshot'])
+        self.assertEqual(result['index_coverage'], 'unknown')
+        self.assertEqual(result['scope'], 'target_marker_index_and_source_observation')
         self.assertEqual(index.checks,[{'notes/fiction.md':'a'*64}])
 
 class RealSqliteTests(unittest.TestCase):

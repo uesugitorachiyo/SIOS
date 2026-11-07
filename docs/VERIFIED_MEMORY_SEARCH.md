@@ -45,3 +45,10 @@ For `memory_index_refresh`, pass the note's canonical filename stem as
 The client rejects invalid stems before making a request and does not echo the
 submitted identifier in the error. A timeout after a valid request remains an
 unknown outcome and does not roll back a committed note.
+
+A successful `memory_index_refresh` reports a bounded observation for one
+marker and source revision. The result includes `atomic_snapshot: false`,
+`index_coverage: unknown`, and its observation scope. Index rows or source
+files can change between or immediately after the individual checks; a positive
+result does not fence other writers or establish continuing search visibility.
+Consumers using strict response schemas must allow these additional fields.

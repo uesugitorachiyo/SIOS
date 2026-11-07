@@ -72,6 +72,8 @@ def refresh(store: Store, identifier: str, expected_revision: str,
     if current["revision"] != expected_revision:
         raise ConflictError("Source revision changed during indexing")
     return {"ready": bool(matches), "reason": None if matches else "target_marker_not_found",
+            "atomic_snapshot": False, "index_coverage": "unknown",
+            "scope": "target_marker_index_and_source_observation",
             "path": relative, "revision": expected_revision,
             "index_hit": {"title": matches[0]["title"], "type": matches[0]["type"],
                           "score": matches[0]["score"], "path": relative} if matches else None,
