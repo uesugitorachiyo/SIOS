@@ -1,8 +1,9 @@
 # Bounded satellite MCP profile
 
-The `sios-memory` source candidate exposes exactly nine tools: health, memory_read,
+The `sios-memory` source candidate exposes eleven tools: health, memory_read,
 memory_capture, memory_index_search, memory_index_status, memory_index_refresh,
-read, read_revision and brain_review. The last three are read-only; they add
+read, read_revision, brain_review, memory_capture_readiness and
+read_successor_evidence. The additional context and evidence tools are read-only; they add
 bounded Guidance, Brain and Mission context to the existing Memory operations.
 It reuses the existing authenticated SIOS Client, strict selective-memory parser
 and MCPServer runtime. It creates no credentials and installs no automatic capture.
@@ -66,6 +67,12 @@ prove app-native operation. Do not add blanket tool approval rules.
   before reading the Markdown parts; stop if the source revision changes.
 - Existing Brain proposals: `brain_review(proposal_id=...)` reads the diff and
   stale-base status only. It cannot create, approve or promote a proposal.
+- `memory_capture_readiness(path, revision)` checks an exact selective-note
+  hit, index checksums and full source within a bounded observation. It never
+  writes or retries capture. The result is non-atomic, and coverage is unknown.
+- `read_successor_evidence(predecessor_path)` inspects bounded search hits and
+  their full sources for declared successors. A returned list is not complete
+  coverage, and neither an empty list nor one hit establishes current state.
 - General search accepts ordinary text, including spaces and hyphens, subject
   to the existing backend query contract. Search snippets are only locators.
 - Refresh: identifier is the note filename stem, no directory or `.md`;

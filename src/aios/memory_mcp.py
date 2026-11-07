@@ -9,13 +9,16 @@ from .client import Client, RemoteError
 from .config import Config
 from .identifiers import portable_component
 from .selective_memory import parse_capture_json, _prepare_capture
+from .client_ready_proof import CaptureReadiness
+from .successor_mcp_bridge import SuccessorBridge
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
 TOOLS = frozenset({'health', 'memory_read', 'memory_capture',
                    'memory_index_search', 'memory_index_status', 'memory_index_refresh',
-                   'read', 'read_revision', 'brain_review'})
+                   'read', 'read_revision', 'brain_review',
+                   'memory_capture_readiness', 'read_successor_evidence'})
 
 _BRAIN_GUIDANCE = frozenset({
     'Brain/AGENTS.md',
@@ -101,6 +104,8 @@ class MemoryGateway:
     def __init__(self, client, *, owner_named_noncanonical=()):
         self.client = client
         self.owner_named_noncanonical = frozenset(owner_named_noncanonical)
+        self.readiness = CaptureReadiness(self.invoke)
+        self.successors = SuccessorBridge(self.invoke)
 
     def invoke(self, tool, params):
         if tool not in TOOLS:
@@ -161,6 +166,8 @@ class MemoryGateway:
             raise ToolError('invalid_response')
         if tool == 'brain_review' and result.get('proposal_id') != params['proposal_id']:
             raise ToolError('invalid_response')
+        if tool == 'memory_capture':
+            return self.readiness.review(result)
         return result
 
 
@@ -217,6 +224,16 @@ def build(client, *, owner_named_noncanonical=()):
     def memory_index_status() -> Any:
         """Show central Memory index status; this grants no other store access."""
         return gateway.invoke('memory_index_status', {})
+
+    @server.tool(annotations=read_ann)
+    def memory_capture_readiness(path: str, revision: str) -> Any:
+        """Observe one committed selective note's search hit, checksums and source; never retry a write."""
+        return gateway.readiness.observe(path, revision)
+
+    @server.tool(annotations=read_ann)
+    async def read_successor_evidence(predecessor_path: str) -> Any:
+        """Find bounded declared successors; index coverage and current state remain unknown."""
+        return await gateway.successors.inspect(predecessor_path)
 
     @server.tool(annotations=write_ann)
     def memory_index_refresh(identifier: str, expected_revision: str,

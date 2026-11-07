@@ -12,6 +12,7 @@ EXPECTED_TOOLS = {
     'health', 'memory_read', 'memory_capture',
     'memory_index_search', 'memory_index_status', 'memory_index_refresh',
     'read', 'read_revision', 'brain_review',
+    'memory_capture_readiness', 'read_successor_evidence',
 }
 
 
@@ -55,7 +56,7 @@ class Tests(unittest.TestCase):
     def test_literal_discovery_contract(self):
         self.assertEqual(TOOLS, EXPECTED_TOOLS)
         listed = asyncio.run(build(self.client).list_tools())
-        self.assertEqual(len(listed), 9)
+        self.assertEqual(len(listed), 11)
         self.assertEqual({tool.name for tool in listed}, EXPECTED_TOOLS)
         by_name = {tool.name: tool for tool in listed}
         for name in ('read', 'read_revision', 'brain_review'):

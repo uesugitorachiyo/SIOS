@@ -64,11 +64,10 @@ search. The basic Memory profile does not automatically configure Hindsight.
 
 ## Compatibility gaps
 
-This source profile does not yet provide the separate client-side
-`memory_capture_readiness` and `read_successor_evidence` helpers present in some
-private satellite installations. Confirm an actual indexed hit and full source
-read separately, and treat successor coverage as unknown. The source also does
-not include a deployment-specific integrity-pinned direct launcher or the
+The profile offers client-side `memory_capture_readiness` and
+`read_successor_evidence`, but neither proves complete index coverage or
+current state. The source does not include a deployment-specific
+integrity-pinned direct launcher or the
 private selected-Hindsight gateway. Do not replace a working installation with
 this profile until the required tool surface, scopes, startup behavior and
 rollback have been checked in a new native application session. Publishing

@@ -14,6 +14,8 @@ from .server import ALL_SCOPES
 from .service import dispatch
 from .store import ConflictError, NotFoundError, Store, ValidationError, RecoveryError
 from .agent_threads import ExpiredError, NotEnabledError
+from .client_ready_proof import CaptureReadiness
+from .successor_mcp_bridge import SuccessorBridge
 
 
 def run(cfg: Config, ca_file: Path | None = None) -> None:
@@ -71,6 +73,19 @@ def run(cfg: Config, ca_file: Path | None = None) -> None:
             raise RuntimeError("storage_unavailable") from None
         except Exception:
             raise RuntimeError("internal_error") from None
+
+    readiness = CaptureReadiness(call)
+    successors = SuccessorBridge(call)
+
+    @mcp.tool(annotations=read_hint)
+    def memory_capture_readiness(path: str, revision: str) -> Any:
+        """Observe one committed selective note's search hit, checksums and source; never retry a write."""
+        return readiness.observe(path, revision)
+
+    @mcp.tool(annotations=read_hint)
+    async def read_successor_evidence(predecessor_path: str) -> Any:
+        """Find bounded declared successors; index coverage and current state remain unknown."""
+        return await successors.inspect(predecessor_path)
 
     @mcp.tool(description="Read one allowed Markdown document or run metadata by relative path.", annotations=read_hint)
     def read(relative: str) -> Any:
@@ -161,7 +176,7 @@ def run(cfg: Config, ca_file: Path | None = None) -> None:
                 if (not isinstance(conditions, list) or
                         any(not isinstance(item, str) for item in conditions)):
                     raise ToolError("invalid_request: conditions must be a list of strings") from None
-            return call("memory_capture", {"request_json": request_json})
+            return readiness.review(call("memory_capture", {"request_json": request_json}))
 
         @mcp.tool(description="Create one bounded project discussion. Requires an enabled server-side thread ACL and threads:create plus threads:read scopes. Participant IDs must be authenticated configured principals with the same project grant.", annotations=write_hint)
         def thread_create(project: str, purpose: str, participants: list[str], request_id: str,
