@@ -73,6 +73,10 @@ prove app-native operation. Do not add blanket tool approval rules.
 - `read_successor_evidence(predecessor_path)` inspects bounded search hits and
   their full sources for declared successors. A returned list is not complete
   coverage, and neither an empty list nor one hit establishes current state.
+  Both helpers issue only read operations, but the existing server may recover
+  an earlier pending Store operation during a read; they are not a guarantee of
+  zero server-side recovery effects. Do not use them to reconcile an unknown
+  write without first checking the applicable recovery procedure.
 - General search accepts ordinary text, including spaces and hyphens, subject
   to the existing backend query contract. Search snippets are only locators.
 - Refresh: identifier is the note filename stem, no directory or `.md`;
