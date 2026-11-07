@@ -1,0 +1,12 @@
+# Merge into the supported Codex MCP configuration; replace locally.
+[mcp_servers.sios-memory]
+command = "<ABSOLUTE_WINDOWS_POWERSHELL_EXE>"
+args = [
+  "-NoLogo", "-NoProfile", "-ExecutionPolicy", "RemoteSigned",
+  "-File", "<PRIVATE_SETUP_ROOT>/windows-memory-client.ps1",
+  "-SetupRoot", "<PRIVATE_SETUP_ROOT>",
+  "-SiosExe", "<RUNTIME>/Scripts/sios-memory.exe",
+  "-ExpectedInstanceId", "<VERIFIED_INSTANCE_ID>",
+  "-ExpectedEndpoint", "https://<VERIFIED_SERVER_HOST>:<PORT>",
+  "-ExpectedCaSha256", "<VERIFIED_CA_FILE_SHA256>"
+]

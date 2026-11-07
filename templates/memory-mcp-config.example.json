@@ -8,11 +8,17 @@
         "-ExecutionPolicy",
         "RemoteSigned",
         "-File",
-        "<PRIVATE_SETUP_ROOT>/windows-client.ps1",
+        "<PRIVATE_SETUP_ROOT>/windows-memory-client.ps1",
         "-SetupRoot",
         "<PRIVATE_SETUP_ROOT>",
         "-SiosExe",
-        "<RUNTIME>/Scripts/sios-memory.exe"
+        "<RUNTIME>/Scripts/sios-memory.exe",
+        "-ExpectedInstanceId",
+        "<VERIFIED_INSTANCE_ID>",
+        "-ExpectedEndpoint",
+        "https://<VERIFIED_SERVER_HOST>:<PORT>",
+        "-ExpectedCaSha256",
+        "<VERIFIED_CA_FILE_SHA256>"
       ]
     }
   }

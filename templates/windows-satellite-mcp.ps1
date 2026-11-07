@@ -22,6 +22,8 @@ if ($Enroll -and $Revoke) { throw 'Choose only one action.' }
 # Use this Windows host's official module, even when PS7 paths were inherited.
 $securityModule = Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1'
 Import-Module -Name $securityModule -ErrorAction Stop
+$utilityModule = Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1'
+Import-Module -Name $utilityModule -ErrorAction Stop
 
 if ([string]::IsNullOrWhiteSpace($SetupRoot)) {
     $root = Join-Path $env:LOCALAPPDATA 'SIOS\client'

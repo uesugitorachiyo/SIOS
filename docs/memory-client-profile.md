@@ -27,8 +27,9 @@ MCP runtime (`pip install 'sios-core[agent]'`). The installed packaging entry po
 is `sios-memory = "aios.memory_mcp:main"`. Use the physical Windows console
 entrypoint generator against that distribution's interpreter; do not copy another
 machine's executable. The template launcher retains DPAPI, CA byte-hash validation,
-TLS verification and target checks. Configure its placeholders privately before
-use. No live config, token, CA pin, machine path or instance identity is bundled.
+TLS verification and target checks. Supply the verified target and CA file hash
+as private launcher arguments. No live config, token, CA pin, machine path or
+instance identity is bundled.
 Its explicit native Security and Utility module imports prevent inherited PS7
 module paths from hiding WinPS ConvertTo-SecureString/Get-FileHash cmdlets.
 Enrollment/revocation branches are source examples, never setup approval.
@@ -98,4 +99,3 @@ and production dispatcher to check oversized-log revision and snapshot handling.
 Neither test proves fresh native-client use or grants a deployment. Restore the
 saved module/config if a deployment fails; do not undo data or remove other servers.
 This public source integration does not deploy or configure any native client.
-No push is authorized.
