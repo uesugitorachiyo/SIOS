@@ -34,9 +34,28 @@ class MCPAdapterTests(unittest.TestCase):
             self.assertTrue({"identity", "read", "catalog", "memory_write", "memory_index_refresh",
                              "memory_index_search", "memory_search_verified", "memory_capture", "memory_capture_readiness",
                              "memory_capture_body_readiness", "memory_literal_verified", "read_successor_evidence",
+                             "hindsight_sources_verify",
                              "thread_create", "thread_post", "thread_list", "thread_read",
                              "thread_fetch", "thread_ack", "thread_close", "thread_revoke"} <= names)
             self.assertNotIn("brain_apply", names)
+
+    def test_hindsight_sources_use_authorized_read(self):
+        from mcp.server.mcpserver import MCPServer
+        body = '# Fictional source\n'
+        revision = hashlib.sha256(body.encode()).hexdigest()
+        path = 'Memory/notes/example.md'
+        with tempfile.TemporaryDirectory(prefix='sios-mcp-') as raw:
+            root = Path(raw)
+            cfg = Config('client', '00000000-0000-4000-8000-000000000001', root/'data', root/'cache',
+                         'UTC', 'https://127.0.0.1:9443', root/'client.json')
+            with patch('aios.mcp_adapter.Client') as client, patch.object(MCPServer, 'run', autospec=True) as start:
+                client.return_value.call.return_value = {'path': path, 'revision': revision, 'text': body}
+                run(cfg)
+                result = asyncio.run(start.call_args.args[0].call_tool('hindsight_sources_verify',
+                    {'candidates': [{'path': path, 'revision': revision}]}))
+            self.assertFalse(result.is_error)
+            self.assertEqual(json.loads(result.content[0].text)['results'][0]['status'], 'verified')
+            client.return_value.call.assert_called_once_with('read', {'relative': path})
 
     def test_capture_readiness_uses_only_existing_read_calls(self):
         from mcp.server.mcpserver import MCPServer

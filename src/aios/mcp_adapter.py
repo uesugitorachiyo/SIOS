@@ -93,6 +93,11 @@ def run(cfg: Config, ca_file: Path | None = None) -> None:
     def read(relative: str) -> Any:
         return call("read", {"relative": relative})
 
+    @mcp.tool(description="Verify explicitly selected Hindsight source pointers against SIOS originals. Does not contact Hindsight; coverage and current state remain unknown.", annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=open_world))
+    def hindsight_sources_verify(candidates: list[dict[str, str]]) -> Any:
+        from .hindsight_evidence import verify_hindsight_sources
+        return verify_hindsight_sources(candidates, lambda path: call("read", {"relative": path}))
+
     @mcp.tool(annotations=read_hint)
     def read_revision(relative: str) -> Any:
         """Read a Mission Markdown SHA-256 and byte count without its body."""

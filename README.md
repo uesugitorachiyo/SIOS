@@ -91,6 +91,8 @@ review; `read_revision` returns a bounded Mission Markdown hash and byte count
 without returning the body.
 
 For a local evidence-linked search screen, see [Evidence Search](docs/EVIDENCE_SEARCH.md).
+For using Hindsight recall results with authorized SIOS originals, see
+[Hindsight source verification](docs/HINDSIGHT_SOURCE_VERIFICATION.md).
 
 See [domain boundaries](docs/DOMAIN_BOUNDARIES.md),
 [conversation capture](docs/CONVERSATION_CAPTURE.md),
