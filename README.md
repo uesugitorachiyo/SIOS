@@ -1,19 +1,45 @@
 # SIOS Core
 
-SIOS Core is an experimental, self-hosted Python service for Brain, Memory,
+SIOS Core is a self-hosted Python service for Brain, Memory,
 Mission and bounded agent-thread records. It keeps authoritative Markdown
 under a configured data root and uses SQLite for operation receipts. The
 `aios` Python module name remains for compatibility; the package and command
 are `sios-core` and `sios`.
 
-This repository contains source code, synthetic tests and generic deployment
-templates. It contains no instance configuration, credentials, certificates,
-personal notes, Mission content or runtime data. Keep those outside the Git
-checkout. The application is a prototype and has not been qualified for a
-production deployment.
+The developer uses a private local SIOS instance in ongoing work. That
+instance includes private configuration, data and integrations that are not
+distributed here. Operational use in one environment does not establish that
+every feature or another installation is production-qualified.
+
+This repository provides source code, synthetic tests, generic documentation
+and templates for starting an independent, empty instance. It does not include
+instance configuration, credentials, certificates, personal notes, Mission
+content or runtime data. Keep those outside the Git checkout. The public source
+is under active development; its validation is bounded and does not establish
+general production readiness or equivalence to the private instance.
 
 See [validation scope](docs/VALIDATION.md) for the public-source checks and
 their limits.
+
+## Architecture at a glance
+
+```text
+User / authorized client
+          |
+       SIOS Core
+      /    |     \
+   Brain  Memory  Missions
+             |
+       Optional index
+```
+
+This is a conceptual view of the public source, not a network deployment
+diagram. Brain holds curated knowledge, Memory holds records, and Missions
+hold work state. Configured Markdown sources remain authoritative; an optional
+Memory index supports discovery. See [domain boundaries](docs/DOMAIN_BOUNDARIES.md)
+for details and [clean-instance setup](docs/CLEAN_START.md) for what can be
+set up independently. Individual integrations and permissions require their
+own configuration and validation.
 
 ## Install and use
 

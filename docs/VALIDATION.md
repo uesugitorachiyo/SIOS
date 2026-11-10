@@ -1,8 +1,13 @@
 # Public source validation scope
 
-Version 0.1.0a8 is an alpha source distribution. The bounded publication
-checks cover a fresh Python 3.12 environment on macOS, not a production
-deployment or all client/operating-system combinations.
+The developer uses a private local SIOS instance in ongoing work. That use and
+the public-source checks below are different evidence: the private instance
+has its own configuration, data and integrations, and is not reproduced by
+the public test fixtures. Neither establishes general production readiness.
+
+The following historical checks apply to the 0.1.0a8 alpha source distribution,
+not automatically to later changes. They covered a fresh Python 3.12
+environment on macOS, not all client/operating-system combinations.
 
 - Wheel and source archive built with the declared setuptools backend.
 - Fresh wheel installation with agent, backup and verification extras.
