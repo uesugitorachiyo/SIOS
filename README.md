@@ -93,6 +93,8 @@ without returning the body.
 For a local evidence-linked search screen, see [Evidence Search](docs/EVIDENCE_SEARCH.md).
 For using Hindsight recall results with authorized SIOS originals, see
 [Hindsight source verification](docs/HINDSIGHT_SOURCE_VERIFICATION.md).
+An optional, explicitly configured Hindsight recall client is also documented
+there; it does not automatically import or synchronize Memory.
 
 See [domain boundaries](docs/DOMAIN_BOUNDARIES.md),
 [conversation capture](docs/CONVERSATION_CAPTURE.md),

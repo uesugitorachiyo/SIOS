@@ -10,6 +10,10 @@ SIOS source is licensed under the repository's [MIT license](LICENSE). Its
 Python dependencies have their own licenses. Installing SIOS through `pip` or
 `uv` obtains those packages separately.
 
+The optional `hindsight` extra installs the separately distributed
+`hindsight-client` Python SDK. Its package metadata declares the MIT license;
+review the exact dependency distributions and notices before redistribution.
+
 An inherited AIOS-Public license inventory remains in
 [`docs/DEPENDENCY_LICENSES.md`](docs/DEPENDENCY_LICENSES.md) for provenance.
 It describes the older AIOS-Public lock and must not be treated as the current

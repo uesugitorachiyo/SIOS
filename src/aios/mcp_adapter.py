@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -97,6 +98,16 @@ def run(cfg: Config, ca_file: Path | None = None) -> None:
     def hindsight_sources_verify(candidates: list[dict[str, str]]) -> Any:
         from .hindsight_evidence import verify_hindsight_sources
         return verify_hindsight_sources(candidates, lambda path: call("read", {"relative": path}))
+
+    if os.environ.get('SIOS_HINDSIGHT_RECALL_ENABLED') == '1':
+        @mcp.tool(description="Send the supplied query to the administrator-configured Hindsight endpoint, bank and strict tag, then verify candidate SIOS sources. Query text leaves SIOS; index coverage and current state remain unknown.", annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True))
+        def hindsight_recall_verified(query: str) -> Any:
+            from .hindsight_recall import recall_verified
+            return recall_verified(url=os.environ.get('SIOS_HINDSIGHT_URL', ''),
+                                   bank=os.environ.get('SIOS_HINDSIGHT_BANK', ''),
+                                   tag=os.environ.get('SIOS_HINDSIGHT_TAG', ''),
+                                   api_key=os.environ.get('SIOS_HINDSIGHT_API_KEY'),
+                                   query=query, read=lambda path: call('read', {'relative': path}))
 
     @mcp.tool(annotations=read_hint)
     def read_revision(relative: str) -> Any:

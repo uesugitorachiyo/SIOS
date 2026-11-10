@@ -16,6 +16,7 @@ dependencies = ["tzdata>=2025.2", "PyYAML==6.0.3"]
 
 [project.optional-dependencies]
 agent = ["mcp==2.3.0"]
+hindsight = ["hindsight-client==1.1.0"]
 index = ["basic-memory==0.23.2"]
 index100 = ["basic-memory==1.0.0"]
 backup = ["cryptography==50.0.2", "psutil==7.2.2"]

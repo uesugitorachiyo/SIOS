@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -56,6 +57,35 @@ class MCPAdapterTests(unittest.TestCase):
             self.assertFalse(result.is_error)
             self.assertEqual(json.loads(result.content[0].text)['results'][0]['status'], 'verified')
             client.return_value.call.assert_called_once_with('read', {'relative': path})
+
+    def test_hindsight_recall_is_opt_in_and_uses_configured_binding(self):
+        from mcp.server.mcpserver import MCPServer
+        with tempfile.TemporaryDirectory(prefix='sios-mcp-') as raw:
+            root = Path(raw)
+            cfg = Config('client', '00000000-0000-4000-8000-000000000001', root/'data', root/'cache',
+                         'UTC', 'https://127.0.0.1:9443', root/'client.json')
+            env = {'SIOS_HINDSIGHT_RECALL_ENABLED': '1', 'SIOS_HINDSIGHT_URL': 'http://127.0.0.1:9000',
+                   'SIOS_HINDSIGHT_BANK': 'fiction', 'SIOS_HINDSIGHT_TAG': 'project:fiction'}
+            with patch.dict(os.environ, env), patch('aios.mcp_adapter.Client'), \
+                 patch.object(MCPServer, 'run', autospec=True) as start, \
+                 patch('aios.hindsight_recall.recall_verified', return_value={'results': []}) as recall:
+                run(cfg)
+                result = asyncio.run(start.call_args.args[0].call_tool('hindsight_recall_verified', {'query': 'fiction'}))
+            self.assertFalse(result.is_error)
+            self.assertEqual(recall.call_args.kwargs['bank'], 'fiction')
+            self.assertEqual(recall.call_args.kwargs['tag'], 'project:fiction')
+
+    def test_hindsight_recall_is_absent_by_default(self):
+        from mcp.server.mcpserver import MCPServer
+        with tempfile.TemporaryDirectory(prefix='sios-mcp-') as raw:
+            root = Path(raw)
+            cfg = Config('client', '00000000-0000-4000-8000-000000000001', root/'data', root/'cache',
+                         'UTC', 'https://127.0.0.1:9443', root/'client.json')
+            with patch.dict(os.environ, {'SIOS_HINDSIGHT_RECALL_ENABLED': ''}), \
+                 patch('aios.mcp_adapter.Client'), patch.object(MCPServer, 'run', autospec=True) as start:
+                run(cfg)
+                names = {tool.name for tool in asyncio.run(start.call_args.args[0].list_tools())}
+            self.assertNotIn('hindsight_recall_verified', names)
 
     def test_capture_readiness_uses_only_existing_read_calls(self):
         from mcp.server.mcpserver import MCPServer
