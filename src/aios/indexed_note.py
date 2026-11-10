@@ -57,12 +57,23 @@ def refresh(store: Store, identifier: str, expected_revision: str,
             path = (store.root / "Memory" / raw).resolve()
         indexed_text = "\n".join(value for value in
             (hit.get("matched_chunk"), hit.get("content")) if isinstance(value, str))
-        if path == expected and query in indexed_text.casefold():
+        snippets = [value.strip().strip("…").strip() for value in
+                    (hit.get("matched_chunk"), hit.get("content")) if isinstance(value, str)]
+        if (path == expected and query in indexed_text.casefold() and
+                any(part and part in note["text"] for part in snippets)):
             matches.append(hit)
+    # A hit for a reused marker can belong to an older indexed revision.
+    # Require the source, entity and complete FTS posting observation for
+    # the requested revision before reporting readiness.
+    if matches and not index._indexed_checksums_match({f"notes/{identifier}.md": expected_revision}):
+        return {"ready": False, "reason": "index_revision_unconfirmed",
+                "path": relative, "revision": expected_revision}
     current = store.read(relative)
     if current["revision"] != expected_revision:
         raise ConflictError("Source revision changed during indexing")
     return {"ready": bool(matches), "reason": None if matches else "target_marker_not_found",
+            "atomic_snapshot": False, "index_coverage": "unknown",
+            "scope": "target_marker_index_and_source_observation",
             "path": relative, "revision": expected_revision,
             "index_hit": {"title": matches[0]["title"], "type": matches[0]["type"],
                           "score": matches[0]["score"], "path": relative} if matches else None,

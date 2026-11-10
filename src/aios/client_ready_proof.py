@@ -93,30 +93,35 @@ class CaptureReadiness:
         return (len(exact) == 1 and exact[0].get("title") == stem and exact[0].get("type") == "entity"
                 and exact[0].get("file_path") == "notes/" + stem + ".md")
 
-    def _observe(self, path: str, stem: str, revision: str, deadline: float) -> bool:
-        def request(operation: str, params: dict[str, Any]) -> Any:
+    def _observe(self, path: str, stem: str, revision: str, deadline: float,
+                 stage_start: Callable[[str], None], stage_end: Callable[[], None]) -> bool:
+        def request(stage: str, operation: str, params: dict[str, Any]) -> Any:
             if time.monotonic() >= deadline:
                 raise TimeoutError
-            value = self._call(operation, params)
+            stage_start(stage)
+            try:
+                value = self._call(operation, params)
+            finally:
+                stage_end()
             if time.monotonic() >= deadline:
                 raise TimeoutError
             return value
 
-        health = request("health", {})
+        health = request("health", "health", {})
         if not isinstance(health, dict) or health.get("ok") is not True or health.get("database") != "ok":
             return False
-        first = request("memory_index_status", {})
+        first = request("status_before", "memory_index_status", {})
         if not self._status_matches(first, stem, revision):
             return False
-        if not self._search_matches(request("memory_index_search", {"query": stem}), path, stem):
+        if not self._search_matches(request("search", "memory_index_search", {"query": stem}), path, stem):
             return False
-        source = request("read", {"relative": path})
+        source = request("read", "read", {"relative": path})
         if not isinstance(source, dict) or source.get("path") != path or source.get("revision") != revision:
             return False
         text = source.get("text")
         if not isinstance(text, str) or hashlib.sha256(text.encode("utf-8")).hexdigest() != revision:
             return False
-        return self._status_matches(request("memory_index_status", {}), stem, revision)
+        return self._status_matches(request("status_after", "memory_index_status", {}), stem, revision)
 
     def review(self, result: Any) -> Any:
         """Return the committed receipt immediately; do not start any RPC."""
@@ -147,19 +152,47 @@ class CaptureReadiness:
         response = {'ready': False, 'reason': 'not_confirmed',
                     'scope': 'exact_stem_checksum_and_full_source_observation',
                     'index_coverage': 'unknown', 'atomic_snapshot': False}
+        start = time.monotonic()
         target = self._target(path, revision)
-        if target is None or not self._slot.acquire(blocking=False):
+        if target is None:
+            response['diagnostic'] = {'stage': 'input', 'outcome': 'invalid_request', 'elapsed_ms': 0, 'stages': []}
             return response
-        deadline = time.monotonic() + self._timeout
+        if not self._slot.acquire(blocking=False):
+            response['diagnostic'] = {'stage': 'input', 'outcome': 'inflight', 'elapsed_ms': 0, 'stages': []}
+            return response
+        deadline = start + self._timeout
         done = threading.Event()
-        answer = [False]
+        lock = threading.Lock()
+        state = {'stage': 'startup', 'began': None, 'stages': [], 'outcome': 'pending'}
+
+        def elapsed_ms(when: float) -> int:
+            return max(0, min(int((when - start) * 1000), int(self._timeout * 1000)))
+
+        def stage_start(stage: str) -> None:
+            with lock:
+                state['stage'] = stage
+                state['began'] = time.monotonic()
+
+        def stage_end() -> None:
+            with lock:
+                now = time.monotonic()
+                if state['began'] is not None:
+                    state['stages'].append({'stage': state['stage'],
+                                            'elapsed_ms': max(0, min(int((now - state['began']) * 1000), int(self._timeout * 1000)))})
+                    state['began'] = None
 
         def run() -> None:
+            outcome = 'rpc_error'
             try:
-                answer[0] = self._observe(*target, deadline) is True
+                confirmed = self._observe(*target, deadline, stage_start, stage_end) is True
+                outcome = 'confirmed' if confirmed else 'evidence_unconfirmed'
+            except TimeoutError:
+                outcome = 'rpc_or_deadline_timeout'
             except Exception:
-                answer[0] = False
+                outcome = 'rpc_error'
             finally:
+                with lock:
+                    state['outcome'] = outcome
                 self._slot.release()
                 done.set()
 
@@ -167,7 +200,17 @@ class CaptureReadiness:
             threading.Thread(target=run, name="sios-client-readiness-proof", daemon=True).start()
         except Exception:
             self._slot.release()
+            response['diagnostic'] = {'stage': 'startup', 'outcome': 'start_error', 'elapsed_ms': elapsed_ms(time.monotonic()), 'stages': []}
             return response
-        if done.wait(max(0.0, deadline - time.monotonic())) and time.monotonic() < deadline and answer[0]:
+        finished = done.wait(max(0.0, deadline - time.monotonic()))
+        now = time.monotonic()
+        with lock:
+            stages = [dict(row) for row in state['stages']]
+            if state['began'] is not None:
+                stages.append({'stage': state['stage'], 'elapsed_ms': max(0, min(int((now - state['began']) * 1000), int(self._timeout * 1000)))})
+            outcome = state['outcome'] if finished and now < deadline else 'deadline_exceeded'
+            response['diagnostic'] = {'stage': state['stage'], 'outcome': outcome,
+                                      'elapsed_ms': elapsed_ms(now), 'stages': stages}
+        if outcome == 'confirmed':
             response.update(ready=True, reason=None)
         return response

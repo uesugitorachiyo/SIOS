@@ -26,6 +26,7 @@ def refresh_after_write(store, operation, result, *, scopes):
         result['index_refresh'] = {'ready': False, 'reason': 'index_scope_unavailable'}
         return result
     expected = {}
+    ready = False
     try:
         paths = [metadata.get('path')]
         if operation == 'publish':
@@ -54,10 +55,13 @@ def refresh_after_write(store, operation, result, *, scopes):
             from .index_retry import complete
             for path, revision in expected.items():
                 complete(store, 'Memory/' + path, revision)
-        result['index_refresh'] = {'ready': ready, 'reason': None if ready else 'not_confirmed'}
+        result['index_refresh'] = ({'ready': False, 'reason': 'search_visibility_unverified',
+                                    'index_projection_ready': True} if ready else
+                                   {'ready': False, 'reason': 'not_confirmed'})
     except Exception:
+        ready = False
         result['index_refresh'] = {'ready': False, 'reason': 'refresh_unavailable'}
-    if not result['index_refresh']['ready']:
+    if not ready:
         try:
             from .index_retry import enqueue_if_absent
             for path, revision in expected.items():

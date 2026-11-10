@@ -58,6 +58,11 @@ python3 -m venv .venv
 ```
 
 Add optional features separately as described in the clean-instance guide.
+Basic Memory 0.23.2 remains the default index extra. An explicitly selected
+[Basic Memory 1.0 option](docs/BASIC_MEMORY_100.md) is available on macOS;
+it requires a separate environment and index and is not a Windows indexer.
+Windows satellite clients can connect to a separately configured SIOS server
+as described below; their own compatibility must be verified independently.
 
 Create a private configuration with `sios setup --help`. Point its data and
 cache roots outside this repository. The server accepts private-network

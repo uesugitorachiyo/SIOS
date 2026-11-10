@@ -77,6 +77,7 @@ def parser():
     index_setup = commands.add_parser("index-setup", help="Configure a separate local Basic Memory index")
     index_setup.add_argument("--executable", default="basic-memory")
     index_setup.add_argument("--index-root", type=Path)
+    index_setup.add_argument("--basic-memory-version", choices=("0.23.2", "1.0.0"), default="0.23.2")
     commands.add_parser("index-status")
     index_search = commands.add_parser("index-search")
     index_search.add_argument("query")
@@ -271,7 +272,8 @@ def main(argv=None):
                 executable = shutil.which(args.executable)
                 if not executable:
                     raise ValueError("Basic Memory executable is unavailable")
-                result = setup_index(cfg, str(Path(executable).absolute()), args.index_root)
+                result = setup_index(cfg, str(Path(executable).absolute()), args.index_root,
+                                     version=args.basic_memory_version)
             else:
                 result = asyncio.run(load_index(cfg.data_root).wait_ready(args.query, timeout=args.timeout))
             print(json.dumps(result, default=str, ensure_ascii=False, indent=2))
@@ -299,14 +301,16 @@ def main(argv=None):
             host = f"[{address[0]}]" if ":" in address[0] else address[0]
             print(json.dumps({"endpoint": f"{scheme}://{host}:{address[1]}", "instance_id": cfg.instance_id}), flush=True)
             from .index_retry import RetryWorker
-            retry_worker = RetryWorker(store).start()
-            try:
-                server.serve_forever()
-            except KeyboardInterrupt:
-                pass
-            finally:
-                retry_worker.stop()
-                server.server_close()
+            repair_callback = None
+            if os.environ.get('SIOS_REPAIR_100_ENABLED') == '1':
+                if sys.platform != 'darwin':
+                    raise ValueError('Basic Memory repair is supported only on macOS')
+                from .index_repair_100 import from_environment
+                repair_callback = from_environment(os.environ)
+            retry_worker = RetryWorker(store, repair=repair_callback,
+                                       resume_uncertain=repair_callback is not None).start()
+            from .graceful_drain import serve_draining
+            serve_draining(server, retry_worker)
             return 0
         if args.command == "mcp":
             from .mcp_adapter import run

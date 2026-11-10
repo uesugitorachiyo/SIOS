@@ -74,18 +74,20 @@ def run(cfg: Config, ca_file: Path | None = None) -> None:
         except Exception:
             raise RuntimeError("internal_error") from None
 
-    readiness = CaptureReadiness(call)
-    successors = SuccessorBridge(call)
-
-    @mcp.tool(annotations=read_hint)
-    def memory_capture_readiness(path: str, revision: str) -> Any:
-        """Observe one committed selective note's search hit, checksums and source; never retry a write."""
-        return readiness.observe(path, revision)
-
-    @mcp.tool(annotations=read_hint)
-    async def read_successor_evidence(predecessor_path: str) -> Any:
-        """Find bounded declared successors; index coverage and current state remain unknown."""
-        return await successors.inspect(predecessor_path)
+    # Observation calls have their own bounded transport. A slow proof must
+    # not change the normal client's timeout or prevent a committed capture.
+    if remote is not None:
+        try:
+            proof_call = Client(cfg, ca_file=ca_file, timeout=6).call
+        except Exception:
+            def proof_call(operation: str, params: dict[str, Any]) -> Any:
+                raise RuntimeError("proof_client_unavailable") from None
+    else:
+        proof_call = call
+    ready_proof = CaptureReadiness(proof_call, timeout=15)
+    from .bounded_body_proof import BodyProof
+    body_proof = BodyProof(proof_call, timeout=15)
+    successor_bridge = SuccessorBridge(call)
 
     @mcp.tool(description="Read one allowed Markdown document or run metadata by relative path.", annotations=read_hint)
     def read(relative: str) -> Any:
@@ -120,13 +122,63 @@ def run(cfg: Config, ca_file: Path | None = None) -> None:
     def memory_index_search(query: str) -> Any:
         return call("memory_index_search", {"query": query})
 
+    @mcp.tool(description="Search indexed Memory and verify full sources and referenced notes. Index coverage and current state remain unknown; reads can trigger server recovery or index synchronization.", annotations=read_hint)
+    def memory_search_verified(query: str, max_reads: int = 6) -> Any:
+        from .search_resolver import resolve_search_verified
+        from mcp.server.mcpserver.exceptions import ToolError
+        status = call("health", {})
+        if not isinstance(status, dict) or status.get("ok") is not True:
+            raise RuntimeError("startup_health_failed")
+        def read_verified(path: str) -> Any:
+            try:
+                return call("read", {"relative": path})
+            except RuntimeError as exc:
+                raise ToolError(str(exc)) from None
+        return resolve_search_verified(
+            query,
+            lambda value: call("memory_index_search", {"query": value}),
+            read_verified,
+            max_reads=max_reads,
+        )
+
     @mcp.tool(description="Show freshness of the configured historical index, if configured.", annotations=read_hint)
     def memory_index_status() -> Any:
         return call("memory_index_status", {})
 
-    @mcp.tool(description="Catch up the isolated index for a committed Memory note and verify its exact revision and full source. A timeout never rolls back the write.", annotations=write_hint)
+    @mcp.tool(description="Observe exact-stem search visibility and source checksum of an already committed selective note. Reads may invoke recovery or synchronization. This does not prove complete index coverage or an atomic snapshot.", annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=open_world))
+    async def memory_capture_readiness(path: str, revision: str) -> Any:
+        return await asyncio.to_thread(ready_proof.observe, path, revision)
+
+    @mcp.tool(description="Check one body marker query against an exact committed selective note and its full source. Does not prove completeness; marker is sent to search, so do not supply secrets. Underlying calls may synchronize or recover state.", annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=open_world))
+    async def memory_capture_body_readiness(path: str, revision: str, marker: str) -> Any:
+        return await asyncio.to_thread(body_proof.check, path, revision, marker)
+
+    @mcp.tool(description="Inspect declared successor evidence using existing read scope. Current state and index coverage remain unknown.", annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=open_world))
+    async def read_successor_evidence(predecessor_path: str) -> Any:
+        return await successor_bridge.inspect(predecessor_path)
+
+    @mcp.tool(description="Explicit literal Memory source scan and bounded full-source verification. Scanning can lock the store and recover pending operations; do not use for unresolved operations. Complete coverage is unknown.", annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=open_world))
+    def memory_literal_verified(query: str, max_reads: int = 6) -> Any:
+        from .literal_search import verify_literal
+        from mcp.server.mcpserver.exceptions import ToolError
+        status = call("health", {})
+        if not isinstance(status, dict) or status.get("ok") is not True or status.get("pending_operations") != 0:
+            raise ToolError("startup_or_pending_unconfirmed")
+        return verify_literal(query, lambda q: call("search", {"store": "memory", "query": q}),
+                              lambda path: call("read", {"relative": path}), max_hits=max_reads)
+
+    @mcp.tool(description="Catch up the isolated index for a committed Memory note and verify its exact revision and full source. Identifier must be the canonical note filename stem, without a path or .md extension. A timeout never rolls back the write.", annotations=write_hint)
     async def memory_index_refresh(identifier: str, expected_revision: str,
                                    query: str, timeout: int = 30) -> Any:
+        from .identifiers import portable_component
+        from mcp.server.mcpserver.exceptions import ToolError
+        try:
+            valid = portable_component(identifier) == identifier
+        except (TypeError, ValueError):
+            valid = False
+        if not valid:
+            # Never include the submitted string in the error or send an RPC.
+            raise ToolError("invalid_identifier: use the canonical note filename stem without a path or .md extension") from None
         return await asyncio.to_thread(call, "memory_index_refresh", {"identifier": identifier,
             "expected_revision": expected_revision, "query": query, "timeout": timeout})
 
@@ -176,7 +228,11 @@ def run(cfg: Config, ca_file: Path | None = None) -> None:
                 if (not isinstance(conditions, list) or
                         any(not isinstance(item, str) for item in conditions)):
                     raise ToolError("invalid_request: conditions must be a list of strings") from None
-            return readiness.review(call("memory_capture", {"request_json": request_json}))
+                if len(conditions) > 12 or any(len(item) > 300 or not item.strip() or "\x00" in item for item in conditions):
+                    raise ToolError("invalid_conditions: use at most 12 nonempty entries of at most 300 characters; no request was sent") from None
+                if len({item.strip() for item in conditions}) != len(conditions):
+                    raise ToolError("invalid_conditions: entries must be distinct; no request was sent") from None
+            return ready_proof.review(call("memory_capture", {"request_json": request_json}))
 
         @mcp.tool(description="Create one bounded project discussion. Requires an enabled server-side thread ACL and threads:create plus threads:read scopes. Participant IDs must be authenticated configured principals with the same project grant.", annotations=write_hint)
         def thread_create(project: str, purpose: str, participants: list[str], request_id: str,

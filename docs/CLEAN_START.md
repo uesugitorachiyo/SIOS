@@ -55,6 +55,12 @@ does not require this dependency or any index service. Review this optional
 dependency chain separately before operational use; it is not needed just
 to create an empty SIOS instance.
 
+Basic Memory 1.0.0 is an additional, explicitly selected macOS option; it is
+not the default and must use its own environment and index. See
+[Basic Memory 1.0 setup and limitations](BASIC_MEMORY_100.md). A Windows
+satellite client can connect to a separately configured server; that does not
+qualify the 1.0 indexer on Windows.
+
 For remote clients, configure your own server instance, TLS trust, scoped
 credentials and client identity using [deployment guidance](FIRST_SLICE_DEPLOYMENT.md).
 Generic templates require your values; they do not enroll a client or contain

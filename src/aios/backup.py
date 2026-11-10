@@ -274,6 +274,18 @@ def _fsync_directory(path):
             pass
 
 
+def _standalone_sqlite(image):
+    """Return a private, standalone image for SQLite deserialize; never mutate input."""
+    if len(image) < 100 or not image.startswith(b'SQLite format 3\x00'):
+        raise ValidationError('Invalid SQLite snapshot header')
+    if image[18:20] == b'\x02\x02':
+        # SQLite documents this for deserializing an already-complete WAL snapshot.
+        return image[:18] + b'\x01\x01' + image[20:]
+    if image[18:20] != b'\x01\x01':
+        raise ValidationError('Unsupported SQLite snapshot format')
+    return image
+
+
 def backup(store: Store, destination: Path, key: bytes) -> dict:
     cipher = _crypto(key)
     destination = _external(destination)
@@ -366,11 +378,32 @@ def backup(store: Store, destination: Path, key: bytes) -> dict:
             raise ValidationError('Backup exceeds the 1 GiB archive limit')
         _admit_large_archive(db_path.stat().st_size + total)
         with contextlib.closing(sqlite3.connect(db_path)) as reader:
+            # BEGIN IMMEDIATE is already held by the Store writer connection.
+            # Pin the reader's logical view before estimating WAL-backed pages.
+            reader.execute('BEGIN')
+            page_count = reader.execute('PRAGMA page_count').fetchone()[0]
+            page_size = reader.execute('PRAGMA page_size').fetchone()[0]
+            if (type(page_count) is not int or type(page_size) is not int or page_count <= 0
+                    or page_size < 512 or page_size > 65536 or page_size & (page_size - 1)):
+                raise ValidationError('Invalid SQLite snapshot size')
+            logical_size = page_count * page_size
+            if logical_size > MAX_ARCHIVE_BYTES - total:
+                raise ValidationError('Backup exceeds the 1 GiB archive limit')
+            _admit_large_archive(total + logical_size)
             with contextlib.closing(sqlite3.connect(':memory:')) as snapshot:
                 reader.backup(snapshot)
                 if snapshot.execute('PRAGMA quick_check').fetchone()[0] != 'ok':
                     raise ValidationError('SQLite snapshot failed integrity check')
-                files[DATABASE] = snapshot.serialize()
+                image = snapshot.serialize()
+                if len(image) != logical_size:
+                    raise ValidationError('SQLite snapshot size changed')
+                # The complete snapshot is private; never normalize the live DB.
+                image = _standalone_sqlite(image)
+                with contextlib.closing(sqlite3.connect(':memory:')) as check:
+                    check.deserialize(image)
+                    if check.execute('PRAGMA quick_check').fetchone()[0] != 'ok':
+                        raise ValidationError('Normalized SQLite snapshot failed integrity check')
+                files[DATABASE] = image
                 executable[DATABASE] = False
                 selection = _selection(snapshot)
         # Preserve the actual current inventory, including unexpected files, so
@@ -481,7 +514,9 @@ def _validate_archive(data):
             raise ValidationError('Conflicting backup member paths')
     try:
         with contextlib.closing(sqlite3.connect(':memory:')) as db:
-            db.deserialize(files[DATABASE])
+            # Preserve authenticated archived bytes for restore; normalize only
+            # the private validation image for historical WAL-mode snapshots.
+            db.deserialize(_standalone_sqlite(files[DATABASE]))
             if db.execute('PRAGMA quick_check').fetchone()[0] != 'ok':
                 raise ValidationError('Invalid backup receipt journal')
             if db.execute('SELECT count(*) FROM operations WHERE complete=0').fetchone()[0]:
