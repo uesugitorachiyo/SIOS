@@ -78,6 +78,9 @@ release qualification.
 | Brain proposal, review and owner application | Source available | [Domain boundaries](DOMAIN_BOUNDARIES.md); separate owner approval |
 | Selective conversation Memory capture | Source available | [Reviewed selected claim](CONVERSATION_CAPTURE.md); no automatic transcript import |
 | Memory index and restricted Memory MCP | Optional source available | Index installation and client scopes; [client profile](memory-client-profile.md) |
+| Hindsight primary gateway and Windows relay | Experimental source | [Single-trust-domain setup and qualification](HINDSIGHT_GATEWAY_DRAFT.md); not automatically installed |
+| Knowledge, Mission and recovery skills | Portable templates | Review and install the desired [skill templates](../templates/skills/); client authority is separate |
+| Morning brief, lead radar and weekly review | Portable templates | [Operator-defined routines](ROUTINE_WORKFLOWS.md); no automatic installation or schedules |
 | Bounded agent discussions | Optional, disabled by default | [Explicit project ACL and principal scopes](AGENT_THREADS_L0.md); no vendor-session control |
 | Protected Mission completion | Optional, disabled by default | [Target allowlist, retained evidence and owner approval](PROTECTED_COMPLETION.md) |
 | Offline Mission evidence check | Limited source available | [Consistency of a supplied export](SIOS_QA_EVIDENCE.md); no current operational attestation |

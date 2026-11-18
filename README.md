@@ -21,6 +21,21 @@ general production readiness or equivalence to the private instance.
 See [validation scope](docs/VALIDATION.md) for the public-source checks and
 their limits.
 
+## What's included
+
+- **Knowledge and Mission workflows:** reusable agent skill templates for
+  source-checked knowledge, resumable Missions, and blocker recovery.
+- **On-demand routines:** templates for a morning brief, public lead radar and
+  weekly review. Operators choose their own focus, sources, Mission authority
+  and timezone; the templates do not create schedules or install themselves.
+- **Windows satellite access:** the existing scoped SIOS MCP client plus an
+  experimental Hindsight relay using authenticated TLS and a journaled central
+  writer on a POSIX host. The gateway is a single trust domain, not
+  project-level isolation; the Windows component is the satellite relay.
+- **Privacy boundaries:** per-installation configuration, credentials,
+  private records, device identities, and operational data remain outside the
+  checkout. Source and search results still need authorization and verification.
+
 ## Architecture at a glance
 
 ```text
@@ -95,6 +110,12 @@ For using Hindsight recall results with authorized SIOS originals, see
 [Hindsight source verification](docs/HINDSIGHT_SOURCE_VERIFICATION.md).
 An optional, explicitly configured Hindsight recall client is also documented
 there; it does not automatically import or synchronize Memory.
+The experimental [Hindsight gateway and Windows relay](docs/HINDSIGHT_GATEWAY_DRAFT.md)
+have a separate single-trust-domain boundary and require operator setup and
+qualification. [Skill templates](templates/skills/) provide reusable procedures;
+review and install only the templates appropriate for your environment. They do
+not install themselves, grant permissions, configure an MCP server or schedule
+runs. See [routine workflow guidance](docs/ROUTINE_WORKFLOWS.md) for boundaries.
 
 See [domain boundaries](docs/DOMAIN_BOUNDARIES.md),
 [conversation capture](docs/CONVERSATION_CAPTURE.md),

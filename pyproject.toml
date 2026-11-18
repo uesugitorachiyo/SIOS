@@ -31,6 +31,8 @@ sios-memory = "aios.memory_mcp:main"
 sios-selected-sync = "aios.selected_sync_mcp:main"
 sios-evidence-search = "aios.evidence_search_web:main"
 sios-basic-memory-100 = "aios.basic_memory_100_launcher:main"
+sios-hindsight-gateway = "aios.hindsight_gateway_main:main"
+sios-hindsight-relay = "aios.hindsight_relay:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
