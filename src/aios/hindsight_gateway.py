@@ -30,6 +30,7 @@ MAX_BODY_BYTES = 600 * 1024
 MAX_CONCURRENT = 8
 SOCKET_TIMEOUT = 75.0
 AUTH_DEADLINE = 5.0
+BODY_DEADLINE = 15.0
 DEVICE = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z')
 VALID_SCOPES = frozenset({'read', 'memory:write'})
 ERROR_CODES = frozenset({'invalid_request_id', 'invalid_content', 'invalid_actor', 'invalid_project_tag',
@@ -296,7 +297,20 @@ class _Handler(BaseHTTPRequestHandler):
         if len(length) > 9 or int(length) > MAX_BODY_BYTES:
             self.close_connection = True
             return self._send(413, {'ok': False, 'error': 'body_too_large'}, device)
-        raw = self.rfile.read(int(length))
+        # A per-read socket timeout alone permits a client to trickle bytes
+        # indefinitely. Bound the entire authenticated request body instead.
+        def expire_body():
+            try:
+                self.connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+        body_timer = threading.Timer(BODY_DEADLINE, expire_body)
+        body_timer.daemon = True
+        body_timer.start()
+        try:
+            raw = self.rfile.read(int(length))
+        finally:
+            body_timer.cancel()
         if len(raw) != int(length):
             self.close_connection = True
             return self._send(400, {'ok': False, 'error': 'invalid_framing'}, device)

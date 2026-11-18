@@ -200,6 +200,24 @@ class GatewayTests(unittest.TestCase):
                 for sock in sockets:
                     sock.close()
 
+    def test_authenticated_incomplete_body_has_absolute_deadline(self):
+        import http.client
+        import time
+        conn = http.client.HTTPSConnection('127.0.0.1', 18991, context=self.ctx, timeout=3)
+        with patch.object(gw, 'BODY_DEADLINE', 0.3):
+            try:
+                conn.putrequest('POST', '/v1/memory_recall')
+                conn.putheader('Authorization', f'Bearer {self.ro_token}')
+                conn.putheader('Content-Length', '100')
+                conn.endheaders()
+                conn.send(b'{')
+                time.sleep(0.8)
+                with self.assertRaises((OSError, http.client.HTTPException)):
+                    conn.getresponse()
+                self.assertEqual(self.req('GET', '/v1/health', self.ro_token)[0], 200)
+            finally:
+                conn.close()
+
     def test_errors_never_leak_details(self):
         st, out = self.req('POST', '/v1/memory_recall', self.rw_token, {'query': 'boom', 'project_tag': 'p'})
         self.assertEqual((st, out['error']), (500, 'internal_error'))
