@@ -3,7 +3,9 @@ param(
     [Parameter(Mandatory=$true)][string]$SetupRoot,
     [string]$Python,
     [string]$Endpoint,
-    [string]$ExpectedCaSha256
+    [string]$ExpectedCaSha256,
+    [string]$RelayScript,
+    [string]$ExpectedRelaySha256
 )
 # Keep this setup directory, CA and DPAPI-protected token outside the checkout.
 $ErrorActionPreference = 'Stop'
@@ -28,6 +30,12 @@ if ($Enroll) {
     return
 }
 if (-not [IO.Path]::IsPathRooted($Python) -or -not (Test-Path -LiteralPath $Python -PathType Leaf)) { throw 'Supply an absolute Python path.' }
+if ($RelayScript) {
+    if (-not [IO.Path]::IsPathRooted($RelayScript) -or -not (Test-Path -LiteralPath $RelayScript -PathType Leaf)) { throw 'Supply an absolute relay script path.' }
+    if ($ExpectedRelaySha256 -notmatch '^[a-fA-F0-9]{64}$' -or (Get-FileHash -LiteralPath $RelayScript -Algorithm SHA256).Hash -ne $ExpectedRelaySha256) { throw 'Relay script hash mismatch.' }
+} elseif ($ExpectedRelaySha256) {
+    throw 'RelayScript is required when a relay hash is supplied.'
+}
 if (-not (Test-Path -LiteralPath $secretPath -PathType Leaf) -or -not (Test-Path -LiteralPath $caPath -PathType Leaf)) { throw 'Enrollment or CA missing.' }
 if ($ExpectedCaSha256 -notmatch '^[a-fA-F0-9]{64}$' -or (Get-FileHash -LiteralPath $caPath -Algorithm SHA256).Hash -ne $ExpectedCaSha256) { throw 'CA hash mismatch.' }
 $uri = $null
@@ -39,7 +47,11 @@ try {
     $token = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr)
     if ($token.Length -lt 32 -or $token.Length -gt 512) { throw 'Invalid enrolled token.' }
     [Environment]::SetEnvironmentVariable('SIOS_MEMORY_GATEWAY_TOKEN', $token, 'Process')
-    & $Python -I -B -m aios.hindsight_relay --endpoint $Endpoint --ca-file $caPath --ca-sha256 $ExpectedCaSha256
+    if ($RelayScript) {
+        & $Python -I -B $RelayScript --endpoint $Endpoint --ca-file $caPath --ca-sha256 $ExpectedCaSha256
+    } else {
+        & $Python -I -B -m aios.hindsight_relay --endpoint $Endpoint --ca-file $caPath --ca-sha256 $ExpectedCaSha256
+    }
     $result = $LASTEXITCODE
 } finally {
     [Environment]::SetEnvironmentVariable('SIOS_MEMORY_GATEWAY_TOKEN', $null, 'Process')

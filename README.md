@@ -116,6 +116,7 @@ qualification. [Skill templates](templates/skills/) provide reusable procedures;
 review and install only the templates appropriate for your environment. They do
 not install themselves, grant permissions, configure an MCP server or schedule
 runs. See [routine workflow guidance](docs/ROUTINE_WORKFLOWS.md) for boundaries.
+The [macOS administrator recovery interface](docs/HINDSIGHT_ADMIN_RECOVERY.md) describes the protected host requirements.
 
 See [domain boundaries](docs/DOMAIN_BOUNDARIES.md),
 [conversation capture](docs/CONVERSATION_CAPTURE.md),

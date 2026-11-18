@@ -33,6 +33,8 @@ sios-evidence-search = "aios.evidence_search_web:main"
 sios-basic-memory-100 = "aios.basic_memory_100_launcher:main"
 sios-hindsight-gateway = "aios.hindsight_gateway_main:main"
 sios-hindsight-relay = "aios.hindsight_relay:main"
+sios-hindsight-recovery-admin = "aios.macos_hindsight.protected_recovery_stdio:main"
+sios-hindsight-resume-application = "aios.macos_hindsight.resume_application:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

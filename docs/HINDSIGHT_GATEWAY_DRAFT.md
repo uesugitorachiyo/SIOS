@@ -93,3 +93,10 @@ The TLS integration tests require an `openssl` executable on the test PATH;
 they are skipped when it is absent. Install the package in the chosen Python
 environment before using the PowerShell launcher: its isolated `-I` mode does
 not import code merely because a checkout is the current directory.
+
+Alternatively, the launcher accepts `-RelayScript` and `-ExpectedRelaySha256`
+for a separately installed standalone `hindsight_relay.py`. Supply an absolute
+path and the full SHA-256 from an independently verified release. The launcher
+checks the file hash before executing it. Keep the script in an installation
+directory protected from modification by other users and processes. The default
+continues to load the relay from the installed Python package.

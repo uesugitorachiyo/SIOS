@@ -45,6 +45,17 @@ class WindowsLauncherTests(unittest.TestCase):
                 self.assertFalse(result['isError'])
                 self.assertIn('fixture', result['content'][0]['text'])
                 self.assertNotIn('fixture-' + 'x' * 48, proc.stdout + proc.stderr)
+                relay = package / 'hindsight_relay.py'
+                relay_hash = hashlib.sha256(relay.read_bytes()).hexdigest()
+                script_cmd = cmd + ['-RelayScript', str(relay), '-ExpectedRelaySha256', relay_hash]
+                script_proc = subprocess.run(script_cmd, input=json.dumps(msg) + '\n', capture_output=True,
+                                             text=True, timeout=45)
+                self.assertEqual(script_proc.returncode, 0, script_proc.stderr)
+                self.assertFalse(json.loads(script_proc.stdout)['result']['isError'])
+                script_cmd[-1] = '0' * 64
+                denied_script = subprocess.run(script_cmd, input='', capture_output=True, text=True, timeout=45)
+                self.assertNotEqual(denied_script.returncode, 0)
+                self.assertIn('Relay script hash mismatch', denied_script.stderr)
                 cmd[-1] = '0' * 64
                 rejected = subprocess.run(cmd, input='', capture_output=True, text=True, timeout=45)
                 self.assertNotEqual(rejected.returncode, 0)
