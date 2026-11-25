@@ -58,3 +58,28 @@ both selective notes were read and their source revisions verified within the
 read budget. Search snippets alone do not establish a relationship. Missing
 results, unread notes, and index coverage remain unknown; a reported edge does
 not establish which decision is current.
+
+## Using evidence in an answer
+
+The helpers return evidence; an agent must still interpret it. For each material
+claim, read the supporting source in full and retain its returned path and full
+revision. Inspect explicit predecessors and relevant successors, including
+successors of newly selected sources, within the available permissions and read
+budget. Distinguish a historical record, its correction, and any independently
+verified current state. If a source cannot be read or successor coverage is
+unknown, say so rather than treating an empty search as proof of completeness.
+
+When records describe similar trials, compare their platform, version, operation,
+time and outcome before associating evidence with the question. An explicit
+platform or version is a constraint; a related record alone does not establish
+that it describes the same trial. If the mapping remains uncertain, describe
+the candidates separately and report the uncertainty. Keep proposed thresholds
+separate from measured results, including their populations and denominators.
+
+Before presenting an answer, check that each material statement and its
+qualifications are supported by the cited source and revision. Do not broaden
+the set of subjects or convert a historical observation into a current claim.
+An internal source path is not automatically a usable link: provide the path
+and revision as text unless the destination has been verified for the reader.
+These practices reduce avoidable ambiguity but do not guarantee that an agent
+will find every correction or produce an accurate answer.

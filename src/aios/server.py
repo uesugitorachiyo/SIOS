@@ -17,6 +17,7 @@ from typing import Any
 from .service import dispatch
 from .agent_threads import ExpiredError, NotEnabledError
 from .basic_memory import BasicMemoryError
+from .identifiers import portable_component
 from .store import Store, ConflictError, ValidationError, RecoveryError
 
 MAX_BODY = 2 * 1024 * 1024
@@ -33,9 +34,22 @@ class Device:
     identity: str
     token: str
     scopes: frozenset[str]
+    mission_write_names: frozenset[str] | None = None
+
+    def __post_init__(self):
+        names = self.mission_write_names
+        if names is None:
+            return
+        if "missions:write" not in self.scopes or "missions:complete" in self.scopes:
+            raise ValueError("Scoped Mission writers require missions:write without missions:complete")
+        if not isinstance(names, frozenset) or any(
+            not isinstance(name, str) or portable_component(name) != name for name in names
+        ):
+            raise ValueError("Mission write names must be canonical slugs")
 
 
-def device_from_env(identity: str, token_env: str, scopes: set[str]) -> Device:
+def device_from_env(identity: str, token_env: str, scopes: set[str],
+                    *, mission_write_names: frozenset[str] | None = None) -> Device:
     if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,99}", identity):
         raise ValueError("Invalid device identity")
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", token_env):
@@ -45,7 +59,7 @@ def device_from_env(identity: str, token_env: str, scopes: set[str]) -> Device:
         raise ValueError("Device token must be 32–4096 printable ASCII characters without whitespace")
     if not scopes or not scopes <= SUPPORTED_SCOPES:
         raise ValueError("Invalid device scopes")
-    return Device(identity, token, frozenset(scopes))
+    return Device(identity, token, frozenset(scopes), mission_write_names)
 
 
 def load_devices(path: Path) -> list[Device]:
@@ -54,12 +68,22 @@ def load_devices(path: Path) -> list[Device]:
     if not isinstance(raw, list) or not raw:
         raise ValueError("Device configuration requires a nonempty list")
     devices = []
+    required = {"identity", "token_env", "scopes"}
     for entry in raw:
-        if not isinstance(entry, dict) or set(entry) != {"identity", "token_env", "scopes"}:
-            raise ValueError("Device entries require identity, token_env and scopes")
+        if not isinstance(entry, dict) or not required <= entry.keys() <= required | {"mission_write_names"}:
+            raise ValueError("Invalid device entry fields")
         if not isinstance(entry["scopes"], list):
             raise ValueError("Device scopes must be a list")
-        devices.append(device_from_env(entry["identity"], entry["token_env"], set(entry["scopes"])))
+        names = None
+        if "mission_write_names" in entry:
+            configured = entry["mission_write_names"]
+            if not isinstance(configured, list) or any(not isinstance(name, str) for name in configured):
+                raise ValueError("mission_write_names must be a list of canonical Mission slugs")
+            names = frozenset(configured)
+            if len(names) != len(configured):
+                raise ValueError("Duplicate Mission write names")
+        devices.append(device_from_env(entry["identity"], entry["token_env"], set(entry["scopes"]),
+                                       mission_write_names=names))
     if len({d.identity for d in devices}) != len(devices) or len({d.token for d in devices}) != len(devices):
         raise ValueError("Device identities and tokens must be distinct")
     return devices
@@ -143,7 +167,14 @@ def make_server(store: Store, instance_id: str, devices: list[Device], *,
                 if envelope["instance_id"] != instance_id:
                     self.respond(409, {"error": "wrong_instance"})
                     return
-                result = dispatcher(store, envelope["operation"], envelope["params"],
+                operation = envelope["operation"]
+                params = envelope["params"]
+                if device.mission_write_names is not None and operation in ("mission_write", "mission_log"):
+                    if not isinstance(params, dict) or not isinstance(params.get("name"), str):
+                        raise ValidationError("Mission write requires a name")
+                    if params["name"] not in device.mission_write_names:
+                        raise PermissionError("Mission is outside device write scope")
+                result = dispatcher(store, operation, params,
                                   actor=device.identity, scopes=set(device.scopes))
                 self.respond(200, {"result": result, "instance_id": instance_id})
             except PermissionError:
