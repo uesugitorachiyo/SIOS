@@ -1,5 +1,10 @@
 # Windows satellite access from MCP applications
 
+For the separate Mac-hosted Hindsight Memory route, use the
+[Windows-to-Mac access guide](WINDOWS_MAC_ACCESS.md) and its Codex registration
+example. The bounded Core/Basic Memory profile below has a different tool
+surface; do not treat it as an interchangeable second Memory writer.
+
 This guide describes the existing Windows stdio adapter for Claude Code,
 Antigravity and Codex. A satellite application launches a local MCP process;
 the process connects to the central SIOS application RPC over authenticated

@@ -16,6 +16,10 @@ __pycache__/
 config.local.*
 *.token
 *.secret
+# Windows credential enrollments and personal Codex configuration/backups.
+*.dpapi
+config.toml
+config.toml.*
 runtime/
 private/
 logs/

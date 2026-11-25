@@ -88,6 +88,12 @@ JSON RPC endpoint is not an HTTP MCP endpoint.
 For Windows satellite use with Claude Code, Antigravity or Codex, see
 [satellite MCP setup](docs/SATELLITE_CLIENTS.md).
 
+The [Windows-to-Mac Memory access guide](docs/WINDOWS_MAC_ACCESS.md) provides
+a credential-free Codex relay example, candidate-route retirement guidance and
+an actual write/readback/search verification checklist. Runtime configuration
+and test records stay private; connection checks and session provenance are
+reported separately.
+
 Memory writes use stable request IDs and revision checks. Basic Memory indexes
 only the configured Memory source; the Markdown note remains authoritative.
 An index timeout does not undo a completed write. Re-read the note and its
