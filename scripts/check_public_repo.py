@@ -19,7 +19,7 @@ ALLOWED_SUFFIXES = {".py", ".md", ".json", ".ps1", ".toml", ".lock", ".txt"}
 FORBIDDEN_NAMES = (
     ".env", ".mcp.json", "AGENTS.md", "CLAUDE.md", "config.local",
     "credential", "secret", ".pem", ".key", ".p12", ".pfx",
-    ".sqlite", ".db", ".log", ".enc", ".bundle",
+    ".sqlite", ".db", ".log", ".enc", ".bundle", ".dpapi", "config.toml",
 )
 CONTENT_RULES = {
     "home directory": re.compile(

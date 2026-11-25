@@ -1,0 +1,26 @@
+# Merge only this table into the supported Codex MCP configuration.
+# Replace placeholders privately; this file is deliberately not runnable as-is.
+# Keep the existing scoped SIOS context client under its own registration.
+[mcp_servers.sios-memory]
+enabled = true
+command = '<ABSOLUTE_WINDOWS_POWERSHELL_EXE>'
+args = [
+  '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'RemoteSigned',
+  '-File', '<PRIVATE_SETUP_ROOT>/windows-hindsight-relay.ps1',
+  '-SetupRoot', '<PRIVATE_SETUP_ROOT>',
+  '-Python', '<VERIFIED_RUNTIME>/python.exe',
+  '-Endpoint', 'https://<VERIFIED_GATEWAY_HOST>:<PORT>',
+  '-ExpectedCaSha256', '<TRUSTED_CA_FILE_SHA256>',
+  '-RelayScript', '<PRIVATE_SETUP_ROOT>/hindsight_relay.py',
+  '-ExpectedRelaySha256', '<TRUSTED_RELAY_FILE_SHA256>'
+]
+startup_timeout_sec = 30
+tool_timeout_sec = 120
+enabled_tools = [
+  'memory_recall', 'memory_store', 'memory_store_reconcile', 'memory_read_primary'
+]
+
+# Do not add a second memory writer or enable blanket write approval.
+# If a retired sios-hindsight-candidate registration already exists, preserve its
+# private definition and set enabled = false there. Do not create one from this
+# example. A changed registration does not attest an already-open chat's state.
